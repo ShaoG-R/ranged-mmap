@@ -397,6 +397,18 @@ impl MmapFile {
     /// 
     /// 同步将内存中的数据刷新到磁盘，阻塞直到完成。
     /// 这比 `flush()` 慢，但保证数据已经写入磁盘。
+    /// 
+    /// # Safety
+    /// 
+    /// During the flush, the caller must ensure no other threads are modifying the
+    /// mapped memory. While sync itself is a safe operation, it is marked unsafe
+    /// for API consistency as it operates on data modified through unsafe methods.
+    /// 
+    /// # Safety
+    /// 
+    /// 在刷新期间，调用者需要确保没有其他线程正在修改映射的内存。
+    /// 虽然 sync 本身是安全的操作，但为了保持 API 一致性，
+    /// 它被标记为 unsafe，因为它操作的是通过 unsafe 方法修改的数据。
     pub unsafe fn sync_all(&self) -> Result<()> {
         unsafe { self.inner.sync_all() }
     }

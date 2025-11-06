@@ -111,11 +111,11 @@
 //!
 //! # 主要类型
 //!
-//! - [`MmapFile`]: 类型安全的内存映射文件
+//! - [`MmapFile`][]: 类型安全的内存映射文件
 //! - [`MmapFileInner`]: Unsafe 高性能内存映射文件
-//! - [`RangeAllocator`]: 分配不重叠的文件范围
-//! - [`AllocatedRange`]: 表示已分配的文件范围
-//! - [`WriteReceipt`]: 证明范围已被写入的凭据
+//! - [`RangeAllocator`][]: 分配不重叠的文件范围
+//! - [`AllocatedRange`][]: 表示已分配的文件范围
+//! - [`WriteReceipt`][]: 证明范围已被写入的凭据
 
 mod file;
 

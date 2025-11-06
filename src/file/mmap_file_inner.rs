@@ -179,6 +179,7 @@ impl MmapFileInner {
         let mmap = unsafe { MmapMut::map_mut(&file)? };
 
         Ok(Self {
+            #[allow(clippy::arc_with_non_send_sync)]
             mmap: Arc::new(UnsafeCell::new(mmap)),
             size,
         })
@@ -230,6 +231,7 @@ impl MmapFileInner {
         let mmap = unsafe { MmapMut::map_mut(&file)? };
 
         Ok(Self {
+            #[allow(clippy::arc_with_non_send_sync)]
             mmap: Arc::new(UnsafeCell::new(mmap)),
             size,
         })
