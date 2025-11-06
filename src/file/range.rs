@@ -2,7 +2,8 @@
 //! 
 //! 文件范围和写入凭据类型
 
-use std::ops::Range;
+use std::{num::NonZeroU64, ops::Range};
+use super::error::{Error, Result};
 
 /// Allocated file range
 /// 
@@ -45,13 +46,14 @@ use std::ops::Range;
 /// # Examples
 /// 
 /// ```
-/// # use ranged_mmap::{MmapFile, RangeAllocator};
+/// # use ranged_mmap::{MmapFile, RangeAllocator, Result};
 /// # use tempfile::tempdir;
-/// # fn main() -> std::io::Result<()> {
+/// # fn main() -> Result<()> {
 /// # let dir = tempdir()?;
 /// # let path = dir.path().join("output.bin");
-/// let (file, mut allocator) = MmapFile::create(&path, 100)?;
-/// let range = allocator.allocate(10).unwrap();
+/// # use std::num::NonZeroU64;
+/// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap())?;
+/// let range = allocator.allocate(NonZeroU64::new(10).unwrap()).unwrap();
 ///
 /// // Get range information
 /// // 获取范围信息
@@ -79,30 +81,15 @@ pub struct AllocatedRange {
 }
 
 impl AllocatedRange {
-    /// Internal constructor (crate-visible only)
+    /// Internal constructor (crate-visible only, no validation)
     /// 
-    /// 内部构造函数（仅 crate 内可见）
+    /// 内部构造函数（仅 crate 内可见，不进行验证）
     /// 
-    /// Creates a range using half-open interval `[start, end)`.
+    /// Creates a range using half-open interval `[start, end)`. No validation is performed.
     /// 
-    /// 使用左闭右开区间 `[start, end)` 创建范围。
-    /// 
-    /// # Parameters
-    /// - `start`: Start position (inclusive)
-    /// - `end`: End position (exclusive)
-    /// 
-    /// # Panics
-    /// In debug mode, panics if `start > end`
-    /// 
-    /// # 参数
-    /// - `start`: 起始位置（包含）
-    /// - `end`: 结束位置（不包含）
-    /// 
-    /// # Panics
-    /// 在 debug 模式下，如果 `start > end` 会 panic
+    /// 使用左闭右开区间 `[start, end)` 创建范围。不进行验证。
     #[inline]
-    pub(crate) fn from_range(start: u64, end: u64) -> Self {
-        debug_assert!(start <= end, "start must be <= end / start 必须小于等于 end");
+    pub(crate) fn from_range_unchecked(start: u64, end: u64) -> Self {
         Self { start, end }
     }
 
@@ -148,6 +135,33 @@ impl AllocatedRange {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.start == self.end
+    }
+
+
+    /// Split the range at the given position
+    /// 
+    /// 在给定位置拆分范围
+    /// 
+    /// # Parameters
+    /// - `pos`: Position to split at
+    /// 
+    /// # Returns
+    /// Two new ranges, or an error if the split would create invalid ranges
+    /// 
+    /// # 参数
+    /// - `pos`: 拆分位置
+    /// 
+    /// # 返回值
+    /// 两个新的范围，如果拆分会创建无效范围则返回错误
+    #[inline]
+    pub fn split_at(&self, pos: NonZeroU64) -> Result<(AllocatedRange, AllocatedRange)> {
+        let start = self.start;
+        let end = self.end;
+
+        if pos.get() >= end {
+            return Err(Error::InvalidRange { start, end });
+        }
+        Ok((AllocatedRange::from_range_unchecked(start, pos.get()), AllocatedRange::from_range_unchecked(pos.get(), end)))
     }
 
     /// Get the range as a tuple (start, end)
@@ -204,13 +218,14 @@ impl From<AllocatedRange> for Range<u64> {
 /// # Examples
 /// 
 /// ```
-/// # use ranged_mmap::MmapFile;
+/// # use ranged_mmap::{MmapFile, Result};
 /// # use tempfile::tempdir;
-/// # fn main() -> std::io::Result<()> {
+/// # fn main() -> Result<()> {
 /// # let dir = tempdir()?;
 /// # let path = dir.path().join("output.bin");
-/// let (file, mut allocator) = MmapFile::create(&path, 1024)?;
-/// let range = allocator.allocate(100).unwrap();
+/// # use std::num::NonZeroU64;
+/// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
+/// let range = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 ///
 /// // Write and get receipt
 /// // 写入并获得凭据

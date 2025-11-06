@@ -5,8 +5,9 @@
 use super::allocator::RangeAllocator;
 use super::mmap_file_inner::MmapFileInner;
 use super::range::{AllocatedRange, WriteReceipt};
-use std::io;
+use super::error::{Error, Result};
 use std::path::Path;
+use std::num::NonZeroU64;
 
 /// Type-safe memory-mapped file
 /// 
@@ -45,19 +46,20 @@ use std::path::Path;
 /// # Usage Example
 /// 
 /// ```
-/// # use ranged_mmap::MmapFile;
+/// # use ranged_mmap::{MmapFile, Result};
 /// # use tempfile::tempdir;
-/// # fn main() -> std::io::Result<()> {
+/// # fn main() -> Result<()> {
 /// # let dir = tempdir()?;
 /// # let path = dir.path().join("output.bin");
+/// # use std::num::NonZeroU64;
 /// // Create file and allocator
 /// // 创建文件和分配器
-/// let (file, mut allocator) = MmapFile::create(&path, 1024)?;
+/// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
 ///
 /// // Allocate ranges in the main thread
 /// // 在主线程分配范围
-/// let range1 = allocator.allocate(512).unwrap();
-/// let range2 = allocator.allocate(512).unwrap();
+/// let range1 = allocator.allocate(NonZeroU64::new(512).unwrap()).unwrap();
+/// let range2 = allocator.allocate(NonZeroU64::new(512).unwrap()).unwrap();
 ///
 /// // Concurrent writes to different ranges (compile-time safe!)
 /// // 并发写入不同范围（编译期安全！）
@@ -115,17 +117,18 @@ impl MmapFile {
     /// # Examples
     /// 
     /// ```
-    /// # use ranged_mmap::MmapFile;
+    /// # use ranged_mmap::{MmapFile, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("output.bin");
-    /// let (file, mut allocator) = MmapFile::create(&path, 10 * 1024 * 1024)?;
+    /// # use std::num::NonZeroU64;
+    /// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(10 * 1024 * 1024).unwrap())?;
     ///
     /// // Allocate some ranges
     /// // 分配一些范围
-    /// let range1 = allocator.allocate(1024).unwrap();
-    /// let range2 = allocator.allocate(2048).unwrap();
+    /// let range1 = allocator.allocate(NonZeroU64::new(1024).unwrap()).unwrap();
+    /// let range2 = allocator.allocate(NonZeroU64::new(2048).unwrap()).unwrap();
     ///
     /// // Use file for concurrent writes
     /// // 使用 file 进行并发写入
@@ -136,13 +139,13 @@ impl MmapFile {
     /// ```
     /// 
     /// # Errors
-    /// - Returns `InvalidInput` error if size is 0
+    /// - Returns `InvalidFileSize` error if size is 0
     /// - Returns corresponding I/O errors if file creation or memory mapping fails
     /// 
     /// # Errors
-    /// - 如果 size 为 0，返回 `InvalidInput` 错误
+    /// - 如果 size 为 0，返回 `InvalidFileSize` 错误
     /// - 如果无法创建文件或映射内存，返回相应的 I/O 错误
-    pub fn create(path: impl AsRef<Path>, size: u64) -> io::Result<(Self, RangeAllocator)> {
+    pub fn create(path: impl AsRef<Path>, size: NonZeroU64) -> Result<(Self, RangeAllocator)> {
         let inner = MmapFileInner::create(path, size)?;
         let allocator = RangeAllocator::new(size);
         Ok((Self { inner }, allocator))
@@ -165,19 +168,20 @@ impl MmapFile {
     /// # Examples
     /// 
     /// ```
-    /// # use ranged_mmap::MmapFile;
+    /// # use ranged_mmap::{MmapFile, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("existing.bin");
+    /// # use std::num::NonZeroU64;
     /// # // Create file first
     /// # // 先创建文件
-    /// # let _ = MmapFile::create(&path, 1024)?;
+    /// # let _ = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
     /// let (file, mut allocator) = MmapFile::open(&path)?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn open(path: impl AsRef<Path>) -> io::Result<(Self, RangeAllocator)> {
+    pub fn open(path: impl AsRef<Path>) -> Result<(Self, RangeAllocator)> {
         let inner = MmapFileInner::open(path)?;
         let size = inner.size();
         let allocator = RangeAllocator::new(size);
@@ -230,16 +234,17 @@ impl MmapFile {
     /// # Examples
     /// 
     /// ```
-    /// # use ranged_mmap::MmapFile;
+    /// # use ranged_mmap::{MmapFile, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("output.bin");
-    /// let (file, mut allocator) = MmapFile::create(&path, 1024)?;
+    /// # use std::num::NonZeroU64;
+    /// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
     ///
     /// // Allocate and write, obtaining a receipt
     /// // 分配并写入，获得凭据
-    /// let range = allocator.allocate(100).unwrap();
+    /// let range = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
     /// let receipt = file.write_range(range, &[42u8; 100])?;
     ///
     /// // Use receipt to flush
@@ -248,8 +253,8 @@ impl MmapFile {
     ///
     /// // Concurrent writes to different ranges
     /// // 并发写入不同范围
-    /// let range1 = allocator.allocate(100).unwrap();
-    /// let range2 = allocator.allocate(100).unwrap();
+    /// let range1 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
+    /// let range2 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
     ///
     /// let f1 = file.clone();
     /// let f2 = file.clone();
@@ -269,23 +274,19 @@ impl MmapFile {
     /// ```
     /// 
     /// # Errors
-    /// Returns `InvalidInput` error if data length does not match range length
+    /// Returns `DataLengthMismatch` error if data length does not match range length
     /// 
     /// # Errors
-    /// 如果数据长度与范围长度不匹配，返回 `InvalidInput` 错误
+    /// 如果数据长度与范围长度不匹配，返回 `DataLengthMismatch` 错误
     #[inline]
-    pub fn write_range(&self, range: AllocatedRange, data: &[u8]) -> io::Result<WriteReceipt> {
+    pub fn write_range(&self, range: AllocatedRange, data: &[u8]) -> Result<WriteReceipt> {
         // Check data length matches
         // 检查数据长度匹配
         if data.len() as u64 != range.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "data length {} doesn't match range length {}",
-                    data.len(),
-                    range.len()
-                ),
-            ));
+            return Err(Error::DataLengthMismatch {
+                data_len: data.len(),
+                range_len: range.len(),
+            });
         }
 
         // Safety: RangeAllocator guarantees non-overlapping ranges
@@ -322,12 +323,12 @@ impl MmapFile {
     /// 返回 [`WriteReceipt`] 凭据，证明该范围已被成功写入
     /// 
     /// # Errors
-    /// Returns `InvalidInput` error if data length does not match range length
+    /// Returns `DataLengthMismatch` error if data length does not match range length
     /// 
     /// # Errors
-    /// 如果数据长度与范围长度不匹配，返回 `InvalidInput` 错误
+    /// 如果数据长度与范围长度不匹配，返回 `DataLengthMismatch` 错误
     #[inline]
-    pub fn write_range_all(&self, range: AllocatedRange, data: &[u8]) -> io::Result<WriteReceipt> {
+    pub fn write_range_all(&self, range: AllocatedRange, data: &[u8]) -> Result<WriteReceipt> {
         self.write_range(range, data)
     }
 
@@ -335,7 +336,7 @@ impl MmapFile {
     /// 
     /// 获取文件大小
     #[inline]
-    pub fn size(&self) -> u64 {
+    pub fn size(&self) -> NonZeroU64 {
         self.inner.size()
     }
 
@@ -360,18 +361,14 @@ impl MmapFile {
     /// 
     /// # 返回值
     /// 返回实际读取的字节数
-    pub fn read_range(&self, range: AllocatedRange, buf: &mut [u8]) -> io::Result<usize> {
+    pub fn read_range(&self, range: AllocatedRange, buf: &mut [u8]) -> Result<usize> {
         let len = range.len() as usize;
 
         if buf.len() < len {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "buffer length {} is smaller than range length {}",
-                    buf.len(),
-                    len
-                ),
-            ));
+            return Err(Error::BufferTooSmall {
+                buffer_len: buf.len(),
+                range_len: range.len(),
+            });
         }
 
         // Safety: Read operations are safe
@@ -387,7 +384,7 @@ impl MmapFile {
     /// The operating system will write data to disk in the background.
     /// 
     /// 发起异步刷新操作，不会阻塞等待完成。操作系统会在后台将数据写入磁盘。
-    pub fn flush(&self) -> io::Result<()> {
+    pub fn flush(&self) -> Result<()> {
         unsafe { self.inner.flush() }
     }
 
@@ -400,7 +397,7 @@ impl MmapFile {
     /// 
     /// 同步将内存中的数据刷新到磁盘，阻塞直到完成。
     /// 这比 `flush()` 慢，但保证数据已经写入磁盘。
-    pub unsafe fn sync_all(&self) -> io::Result<()> {
+    pub unsafe fn sync_all(&self) -> Result<()> {
         unsafe { self.inner.sync_all() }
     }
 
@@ -427,13 +424,14 @@ impl MmapFile {
     /// # Examples
     /// 
     /// ```
-    /// # use ranged_mmap::MmapFile;
+    /// # use ranged_mmap::{MmapFile, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("output.bin");
-    /// let (file, mut allocator) = MmapFile::create(&path, 1024)?;
-    /// let range = allocator.allocate(100).unwrap();
+    /// # use std::num::NonZeroU64;
+    /// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
+    /// let range = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
     ///
     /// // Write and get receipt
     /// // 写入并获得凭据
@@ -445,7 +443,7 @@ impl MmapFile {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn flush_range(&self, receipt: WriteReceipt) -> io::Result<()> {
+    pub fn flush_range(&self, receipt: WriteReceipt) -> Result<()> {
         let range = receipt.range();
         unsafe { self.inner.flush_range(range.start(), range.len() as usize) }
     }

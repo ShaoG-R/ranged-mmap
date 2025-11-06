@@ -7,14 +7,15 @@ use tempfile::tempdir;
 #[cfg(test)]
 mod mmap_file_inner_tests {
     use super::*;
+    use std::num::NonZeroU64;
 
     #[test]
     fn test_create_and_basic_operations() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_basic.bin");
 
-        let file = MmapFileInner::create(&path, 100).unwrap();
-        assert_eq!(file.size(), 100);
+        let file = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
+        assert_eq!(file.size(), NonZeroU64::new(100).unwrap());
 
         // 基本写入操作
         unsafe {
@@ -39,7 +40,7 @@ mod mmap_file_inner_tests {
         let path = dir.path().join("inner_open.bin");
 
         // 先创建文件
-        let file1 = MmapFileInner::create(&path, 100).unwrap();
+        let file1 = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
         unsafe {
             file1.write_all_at(0, b"test").unwrap();
             file1.sync_all().unwrap();
@@ -48,7 +49,7 @@ mod mmap_file_inner_tests {
 
         // 重新打开
         let file2 = MmapFileInner::open(&path).unwrap();
-        assert_eq!(file2.size(), 100);
+        assert_eq!(file2.size(), NonZeroU64::new(100).unwrap());
 
         let mut buf = vec![0u8; 4];
         unsafe {
@@ -62,7 +63,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_write_len.bin");
 
-        let file = MmapFileInner::create(&path, 100).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
         unsafe {
             let written = file.write_at(0, b"hello").unwrap();
@@ -78,7 +79,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_concurrent.bin");
 
-        let file = MmapFileInner::create(&path, 1000).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
         // 10个线程并发写入不重叠区域
         std::thread::scope(|s| {
@@ -115,7 +116,7 @@ mod mmap_file_inner_tests {
         let chunk_size = 1024;
         let file_size = num_threads * chunk_size;
 
-        let file = MmapFileInner::create(&path, file_size as u64).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(file_size as u64).unwrap()).unwrap();
 
         std::thread::scope(|s| {
             for i in 0..num_threads {
@@ -146,7 +147,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_out_of_order.bin");
 
-        let file = MmapFileInner::create(&path, 300).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(300).unwrap()).unwrap();
 
         // 乱序写入
         unsafe {
@@ -179,7 +180,7 @@ mod mmap_file_inner_tests {
 
         // 写入 10MB
         let size = 10 * 1024 * 1024;
-        let file = MmapFileInner::create(&path, size).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(size).unwrap()).unwrap();
 
         let data = vec![0xAB; size as usize];
         unsafe {
@@ -187,7 +188,7 @@ mod mmap_file_inner_tests {
             file.sync_all().unwrap();
         }
 
-        assert_eq!(file.size(), size);
+        assert_eq!(file.size(), NonZeroU64::new(size).unwrap());
 
         // 验证部分数据
         let mut buf = vec![0u8; 1024];
@@ -205,7 +206,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_bounds.bin");
 
-        let file = MmapFileInner::create(&path, 100).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
         // 尝试写入超出边界
         let result = unsafe { file.write_at(95, b"hello world") };
@@ -229,7 +230,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_read_bounds.bin");
 
-        let file = MmapFileInner::create(&path, 100).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
         unsafe {
             file.write_all_at(0, b"hello").unwrap();
@@ -263,7 +264,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_fill.bin");
 
-        let file = MmapFileInner::create(&path, 1000).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
         // 填充为 0xFF
         unsafe {
@@ -291,7 +292,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_read_slice.bin");
 
-        let file = MmapFileInner::create(&path, 100).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
         unsafe {
             file.write_all_at(10, b"hello world").unwrap();
@@ -309,7 +310,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_flush_range.bin");
 
-        let file = MmapFileInner::create(&path, 1000).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
         unsafe {
             file.write_all_at(0, b"hello").unwrap();
@@ -326,21 +327,11 @@ mod mmap_file_inner_tests {
     }
 
     #[test]
-    fn test_zero_size_error() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("inner_zero_size.bin");
-
-        let result = MmapFileInner::create(&path, 0);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
-    }
-
-    #[test]
     fn test_clone_and_shared_access() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_clone.bin");
 
-        let file1 = MmapFileInner::create(&path, 100).unwrap();
+        let file1 = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
         let file2 = file1.clone();
 
         // 两个引用写入不同位置
@@ -364,7 +355,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_as_ptr.bin");
 
-        let file = MmapFileInner::create(&path, 100).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
         unsafe {
             file.write_all_at(0, b"hello").unwrap();
@@ -383,7 +374,7 @@ mod mmap_file_inner_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("inner_as_mut_ptr.bin");
 
-        let file = MmapFileInner::create(&path, 100).unwrap();
+        let file = MmapFileInner::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
         unsafe {
             let mut_ptr = file.as_mut_ptr();
@@ -407,15 +398,16 @@ mod mmap_file_inner_tests {
 #[cfg(test)]
 mod mmap_file_tests {
     use super::*;
+    use std::num::NonZeroU64;
 
     #[test]
     fn test_create_with_allocator() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_create.bin");
 
-        let (file, allocator) = MmapFile::create(&path, 1024).unwrap();
-        assert_eq!(file.size(), 1024);
-        assert_eq!(allocator.total_size(), 1024);
+        let (file, allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap()).unwrap();
+        assert_eq!(file.size(), NonZeroU64::new(1024).unwrap());
+        assert_eq!(allocator.total_size(), NonZeroU64::new(1024).unwrap());
         assert_eq!(allocator.remaining(), 1024);
     }
 
@@ -425,8 +417,8 @@ mod mmap_file_tests {
         let path = dir.path().join("safe_open.bin");
 
         // 先创建
-        let (file1, mut allocator1) = MmapFile::create(&path, 100).unwrap();
-        let range = allocator1.allocate(10).unwrap();
+        let (file1, mut allocator1) = MmapFile::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
+        let range = allocator1.allocate(NonZeroU64::new(10).unwrap()).unwrap();
         file1.write_range(range, b"testdata!!").unwrap();
         unsafe { file1.sync_all().unwrap(); }
         drop(file1);
@@ -434,10 +426,10 @@ mod mmap_file_tests {
 
         // 重新打开
         let (file2, mut allocator2) = MmapFile::open(&path).unwrap();
-        assert_eq!(file2.size(), 100);
-        assert_eq!(allocator2.total_size(), 100);
+        assert_eq!(file2.size(), NonZeroU64::new(100).unwrap());
+        assert_eq!(allocator2.total_size(), NonZeroU64::new(100).unwrap());
 
-        let range = allocator2.allocate(10).unwrap();
+        let range = allocator2.allocate(NonZeroU64::new(10).unwrap()).unwrap();
         let mut buf = vec![0u8; 10];
         file2.read_range(range, &mut buf).unwrap();
         assert_eq!(&buf, b"testdata!!");
@@ -448,11 +440,11 @@ mod mmap_file_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_basic.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 100).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
         // 分配并写入
-        let range1 = allocator.allocate(10).unwrap();
-        let range2 = allocator.allocate(20).unwrap();
+        let range1 = allocator.allocate(NonZeroU64::new(10).unwrap()).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(20).unwrap()).unwrap();
 
         let receipt1 = file.write_range(range1, b"hello_test").unwrap();
         let receipt2 = file.write_range(range2, b"world_test_data_here").unwrap();
@@ -478,9 +470,9 @@ mod mmap_file_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_write_all.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 100).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
-        let range = allocator.allocate(10).unwrap();
+        let range = allocator.allocate(NonZeroU64::new(10).unwrap()).unwrap();
         let receipt = file.write_range_all(range, b"1234567890").unwrap();
 
         assert_eq!(receipt.len(), 10);
@@ -493,12 +485,12 @@ mod mmap_file_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_concurrent.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 1000).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
         // 预先分配所有范围
         let mut ranges = Vec::new();
         for _ in 0..10 {
-            ranges.push(allocator.allocate(100).unwrap());
+            ranges.push(allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap());
         }
 
         // 并发写入（编译期安全！）
@@ -515,9 +507,9 @@ mod mmap_file_tests {
         unsafe { file.sync_all().unwrap(); }
 
         // 验证
-        let mut allocator2 = RangeAllocator::new(1000);
+        let mut allocator2 = RangeAllocator::new(NonZeroU64::new(1000).unwrap());
         for i in 0..10 {
-            let range = allocator2.allocate(100).unwrap();
+            let range = allocator2.allocate(NonZeroU64::new(100).unwrap()).unwrap();
             let mut buf = vec![0u8; 100];
             file.read_range(range, &mut buf).unwrap();
             assert_eq!(buf, vec![i as u8; 100]);
@@ -534,12 +526,12 @@ mod mmap_file_tests {
         let chunk_size = 1024;
         let file_size = num_threads * chunk_size;
 
-        let (file, mut allocator) = MmapFile::create(&path, file_size as u64).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(file_size as u64).unwrap()).unwrap();
 
         // 预先分配所有范围
         let mut ranges = Vec::new();
         for _ in 0..num_threads {
-            ranges.push(allocator.allocate(chunk_size as u64).unwrap());
+            ranges.push(allocator.allocate(NonZeroU64::new(chunk_size as u64).unwrap()).unwrap());
         }
 
         // 并发写入
@@ -556,9 +548,9 @@ mod mmap_file_tests {
         unsafe { file.sync_all().unwrap(); }
 
         // 验证
-        let mut allocator2 = RangeAllocator::new(file_size as u64);
+        let mut allocator2 = RangeAllocator::new(NonZeroU64::new(file_size as u64).unwrap());
         for i in 0..num_threads {
-            let range = allocator2.allocate(chunk_size as u64).unwrap();
+            let range = allocator2.allocate(NonZeroU64::new(chunk_size as u64).unwrap()).unwrap();
             let mut buf = vec![0u8; chunk_size];
             file.read_range(range, &mut buf).unwrap();
             assert_eq!(buf, vec![i as u8; chunk_size]);
@@ -570,9 +562,9 @@ mod mmap_file_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_length_mismatch.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 100).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
-        let range = allocator.allocate(10).unwrap();
+        let range = allocator.allocate(NonZeroU64::new(10).unwrap()).unwrap();
 
         // 数据长度不匹配 - 太短
         let result = file.write_range(range, b"hello");
@@ -592,9 +584,9 @@ mod mmap_file_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_read_buf.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 100).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
-        let range = allocator.allocate(10).unwrap();
+        let range = allocator.allocate(NonZeroU64::new(10).unwrap()).unwrap();
         file.write_range(range, b"0123456789").unwrap();
 
         // buffer 太小
@@ -620,10 +612,10 @@ mod mmap_file_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_flush.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 1000).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
-        let range1 = allocator.allocate(100).unwrap();
-        let range2 = allocator.allocate(100).unwrap();
+        let range1 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 
         let receipt1 = file.write_range(range1, &[1u8; 100]).unwrap();
         let receipt2 = file.write_range(range2, &[2u8; 100]).unwrap();
@@ -644,9 +636,9 @@ mod mmap_file_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_receipt.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 100).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
 
-        let range = allocator.allocate(50).unwrap();
+        let range = allocator.allocate(NonZeroU64::new(50).unwrap()).unwrap();
         let receipt = file.write_range(range, &[0u8; 50]).unwrap();
 
         assert_eq!(receipt.start(), 0);
@@ -655,26 +647,17 @@ mod mmap_file_tests {
         assert!(!receipt.is_empty());
         assert_eq!(receipt.range(), range);
     }
-
-    #[test]
-    fn test_zero_size_error() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("safe_zero_size.bin");
-
-        let result = MmapFile::create(&path, 0);
-        assert!(result.is_err());
-    }
-
+    
     #[test]
     fn test_clone_and_shared_access() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("safe_clone.bin");
 
-        let (file1, mut allocator) = MmapFile::create(&path, 100).unwrap();
+        let (file1, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap()).unwrap();
         let file2 = file1.clone();
 
-        let range1 = allocator.allocate(20).unwrap();
-        let range2 = allocator.allocate(20).unwrap();
+        let range1 = allocator.allocate(NonZeroU64::new(20).unwrap()).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(20).unwrap()).unwrap();
 
         // 两个克隆分别写入
         file1.write_range(range1, b"from_file1__________").unwrap();
@@ -697,34 +680,35 @@ mod mmap_file_tests {
 #[cfg(test)]
 mod range_allocator_tests {
     use super::*;
+    use std::num::NonZeroU64;
 
     #[test]
     fn test_new_allocator() {
-        let allocator = RangeAllocator::new(1000);
-        assert_eq!(allocator.total_size(), 1000);
+        let allocator = RangeAllocator::new(NonZeroU64::new(1000).unwrap());
+        assert_eq!(allocator.total_size(), NonZeroU64::new(1000).unwrap());
         assert_eq!(allocator.remaining(), 1000);
         assert_eq!(allocator.next_pos(), 0);
     }
 
     #[test]
     fn test_sequential_allocation() {
-        let mut allocator = RangeAllocator::new(1000);
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(1000).unwrap());
 
-        let range1 = allocator.allocate(100).unwrap();
+        let range1 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
         assert_eq!(range1.start(), 0);
         assert_eq!(range1.end(), 100);
         assert_eq!(range1.len(), 100);
         assert_eq!(allocator.next_pos(), 100);
         assert_eq!(allocator.remaining(), 900);
 
-        let range2 = allocator.allocate(200).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(200).unwrap()).unwrap();
         assert_eq!(range2.start(), 100);
         assert_eq!(range2.end(), 300);
         assert_eq!(range2.len(), 200);
         assert_eq!(allocator.next_pos(), 300);
         assert_eq!(allocator.remaining(), 700);
 
-        let range3 = allocator.allocate(700).unwrap();
+        let range3 = allocator.allocate(NonZeroU64::new(700).unwrap()).unwrap();
         assert_eq!(range3.start(), 300);
         assert_eq!(range3.end(), 1000);
         assert_eq!(allocator.next_pos(), 1000);
@@ -733,65 +717,61 @@ mod range_allocator_tests {
 
     #[test]
     fn test_allocation_exhaustion() {
-        let mut allocator = RangeAllocator::new(100);
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(100).unwrap());
 
-        let range1 = allocator.allocate(50).unwrap();
+        let range1 = allocator.allocate(NonZeroU64::new(50).unwrap()).unwrap();
         assert_eq!(range1.len(), 50);
         assert_eq!(allocator.remaining(), 50);
 
-        let range2 = allocator.allocate(50).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(50).unwrap()).unwrap();
         assert_eq!(range2.len(), 50);
         assert_eq!(allocator.remaining(), 0);
 
         // 空间耗尽
-        let result = allocator.allocate(1);
-        assert!(result.is_none());
+        let result = allocator.allocate(NonZeroU64::new(1).unwrap());
+        assert!(result.is_err());
 
         // 继续尝试分配
-        let result = allocator.allocate(10);
-        assert!(result.is_none());
+        let result = allocator.allocate(NonZeroU64::new(10).unwrap());
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_allocate_zero_size() {
-        let mut allocator = RangeAllocator::new(100);
-
-        let range = allocator.allocate(0).unwrap();
-        assert_eq!(range.start(), 0);
-        assert_eq!(range.end(), 0);
-        assert_eq!(range.len(), 0);
-        assert!(range.is_empty());
-        assert_eq!(allocator.remaining(), 100);
+        // NonZeroU64::new(0) returns None, so we can't test zero-size allocation
+        // The type system prevents allocating zero-size ranges
+        // NonZeroU64::new(0) 返回 None，所以无法测试零大小分配
+        // 类型系统防止分配零大小范围
     }
 
     #[test]
     fn test_allocate_exact_remaining() {
-        let mut allocator = RangeAllocator::new(100);
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(100).unwrap());
 
-        let _range1 = allocator.allocate(30).unwrap();
+        let _range1 = allocator.allocate(NonZeroU64::new(30).unwrap()).unwrap();
         assert_eq!(allocator.remaining(), 70);
 
         // 分配剩余的精确大小
-        let range2 = allocator.allocate(70).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(70).unwrap()).unwrap();
         assert_eq!(range2.len(), 70);
         assert_eq!(allocator.remaining(), 0);
     }
 
     #[test]
     fn test_allocate_more_than_total() {
-        let mut allocator = RangeAllocator::new(100);
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(100).unwrap());
 
-        let result = allocator.allocate(200);
-        assert!(result.is_none());
+        let result = allocator.allocate(NonZeroU64::new(200).unwrap());
+        assert!(result.is_err());
         assert_eq!(allocator.remaining(), 100);
     }
 
     #[test]
     fn test_multiple_small_allocations() {
-        let mut allocator = RangeAllocator::new(100);
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(100).unwrap());
 
         for i in 0..10 {
-            let range = allocator.allocate(10).unwrap();
+            let range = allocator.allocate(NonZeroU64::new(10).unwrap()).unwrap();
             assert_eq!(range.start(), i * 10);
             assert_eq!(range.end(), (i + 1) * 10);
         }
@@ -805,11 +785,12 @@ mod range_allocator_tests {
 mod types_tests {
     use super::*;
     use std::ops::Range;
+    use std::num::NonZeroU64;
 
     #[test]
     fn test_allocated_range_properties() {
-        let mut allocator = RangeAllocator::new(1000);
-        let range = allocator.allocate(100).unwrap();
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(1000).unwrap());
+        let range = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 
         assert_eq!(range.start(), 0);
         assert_eq!(range.end(), 100);
@@ -818,20 +799,9 @@ mod types_tests {
     }
 
     #[test]
-    fn test_allocated_range_empty() {
-        let mut allocator = RangeAllocator::new(1000);
-        let range = allocator.allocate(0).unwrap();
-
-        assert_eq!(range.start(), 0);
-        assert_eq!(range.end(), 0);
-        assert_eq!(range.len(), 0);
-        assert!(range.is_empty());
-    }
-
-    #[test]
     fn test_allocated_range_conversions() {
-        let mut allocator = RangeAllocator::new(1000);
-        let range = allocator.allocate(100).unwrap();
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(1000).unwrap());
+        let range = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 
         // 测试 as_range_tuple
         let (start, end) = range.as_range_tuple();
@@ -849,10 +819,10 @@ mod types_tests {
 
     #[test]
     fn test_allocated_range_equality() {
-        let mut allocator = RangeAllocator::new(1000);
-        let range1 = allocator.allocate(100).unwrap();
-        let range2 = allocator.allocate(100).unwrap();
-        let range3 = allocator.allocate(100).unwrap();
+        let mut allocator = RangeAllocator::new(NonZeroU64::new(1000).unwrap());
+        let range1 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
+        let range3 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 
         // 测试相等性
         assert_eq!(range1, range1);
@@ -869,9 +839,9 @@ mod types_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("receipt_props.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 1000).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
-        let range = allocator.allocate(150).unwrap();
+        let range = allocator.allocate(NonZeroU64::new(150).unwrap()).unwrap();
         let receipt = file.write_range(range, &[0u8; 150]).unwrap();
 
         assert_eq!(receipt.start(), 0);
@@ -882,30 +852,14 @@ mod types_tests {
     }
 
     #[test]
-    fn test_write_receipt_empty_range() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("receipt_empty.bin");
-
-        let (file, mut allocator) = MmapFile::create(&path, 1000).unwrap();
-
-        let range = allocator.allocate(0).unwrap();
-        let receipt = file.write_range(range, &[]).unwrap();
-
-        assert_eq!(receipt.start(), 0);
-        assert_eq!(receipt.end(), 0);
-        assert_eq!(receipt.len(), 0);
-        assert!(receipt.is_empty());
-    }
-
-    #[test]
     fn test_write_receipt_equality() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("receipt_eq.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 1000).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
-        let range1 = allocator.allocate(100).unwrap();
-        let range2 = allocator.allocate(100).unwrap();
+        let range1 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
+        let range2 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 
         let receipt1 = file.write_range(range1, &[1u8; 100]).unwrap();
         let receipt2 = file.write_range(range2, &[2u8; 100]).unwrap();
@@ -922,9 +876,9 @@ mod types_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("receipt_multi.bin");
 
-        let (file, mut allocator) = MmapFile::create(&path, 1000).unwrap();
+        let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1000).unwrap()).unwrap();
 
-        let range = allocator.allocate(100).unwrap();
+        let range = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 
         // 可以多次写入同一个范围（虽然不常见）
         let receipt1 = file.write_range(range, &[1u8; 100]).unwrap();

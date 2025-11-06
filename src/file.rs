@@ -40,19 +40,20 @@
 //! 通过编译期类型检查保证并发安全：
 //!
 //! ```
-//! # use ranged_mmap::MmapFile;
+//! # use ranged_mmap::{MmapFile, Result};
 //! # use tempfile::tempdir;
-//! # fn main() -> std::io::Result<()> {
+//! # fn main() -> Result<()> {
 //! # let dir = tempdir()?;
 //! # let path = dir.path().join("output.bin");
+//! # use std::num::NonZeroU64;
 //! // Create file and allocator
 //! // 创建文件和分配器
-//! let (file, mut allocator) = MmapFile::create(&path, 1024)?;
+//! let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
 //!
 //! // Allocate ranges in the main thread
 //! // 在主线程分配范围
-//! let range1 = allocator.allocate(512).unwrap();
-//! let range2 = allocator.allocate(512).unwrap();
+//! let range1 = allocator.allocate(NonZeroU64::new(512).unwrap()).unwrap();
+//! let range2 = allocator.allocate(NonZeroU64::new(512).unwrap()).unwrap();
 //!
 //! // Concurrent writes to different ranges (compile-time safe!)
 //! // 并发写入不同范围（编译期安全！）
@@ -78,12 +79,13 @@
 //! 如果你需要最大性能并且能够保证并发安全，可以使用 [`MmapFileInner`]：
 //!
 //! ```
-//! # use ranged_mmap::MmapFileInner;
+//! # use ranged_mmap::{MmapFileInner, Result};
 //! # use tempfile::tempdir;
-//! # fn main() -> std::io::Result<()> {
+//! # fn main() -> Result<()> {
 //! # let dir = tempdir()?;
 //! # let path = dir.path().join("download.bin");
-//! let file = MmapFileInner::create(&path, 1024)?;
+//! # use std::num::NonZeroU64;
+//! let file = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
 //!
 //! // ⚠️ Users must ensure concurrent writes do not overlap
 //! // ⚠️ 用户需自行保证不会并发写入重叠区域
@@ -103,6 +105,7 @@
 //! ```
 
 mod allocator;
+mod error;
 mod mmap_file;
 mod mmap_file_inner;
 mod range;
@@ -113,6 +116,7 @@ mod tests;
 // Re-export public API
 // 重新导出公共 API
 pub use allocator::RangeAllocator;
+pub use error::{Error, Result};
 pub use mmap_file::MmapFile;
 pub use mmap_file_inner::MmapFileInner;
 pub use range::{AllocatedRange, WriteReceipt};

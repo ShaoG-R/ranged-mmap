@@ -5,9 +5,10 @@
 use memmap2::MmapMut;
 use std::cell::UnsafeCell;
 use std::fs::OpenOptions;
-use std::io;
 use std::path::Path;
 use std::sync::Arc;
+use std::num::NonZeroU64;
+use super::error::{Error, Result};
 
 /// High-performance memory-mapped file (Unsafe lock-free version)
 ///
@@ -74,12 +75,13 @@ use std::sync::Arc;
 /// # Examples
 ///
 /// ```
-/// # use ranged_mmap::MmapFileInner;
+/// # use ranged_mmap::{MmapFileInner, Result};
 /// # use tempfile::tempdir;
-/// # fn main() -> std::io::Result<()> {
+/// # fn main() -> Result<()> {
 /// # let dir = tempdir()?;
 /// # let path = dir.path().join("download.bin");
-/// let file = MmapFileInner::create(&path, 1024)?;
+/// # use std::num::NonZeroU64;
+/// let file = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
 ///
 /// // ⚠️ Users must ensure concurrent writes do not overlap
 /// // ⚠️ 用户需自行保证不会并发写入重叠区域
@@ -113,7 +115,7 @@ pub struct MmapFileInner {
     /// File size in bytes
     /// 
     /// 文件大小
-    size: u64,
+    size: NonZeroU64,
 }
 
 impl MmapFileInner {
@@ -137,32 +139,27 @@ impl MmapFileInner {
     /// # Examples
     ///
     /// ```
-    /// # use ranged_mmap::MmapFileInner;
+    /// # use ranged_mmap::{MmapFileInner, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("output.bin");
+    /// # use std::num::NonZeroU64;
     /// // Create a 10MB file
     /// // 创建 10MB 的文件
-    /// let file = MmapFileInner::create(&path, 10 * 1024 * 1024)?;
+    /// let file = MmapFileInner::create(&path, NonZeroU64::new(10 * 1024 * 1024).unwrap())?;
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// # Errors
-    /// - Returns `InvalidInput` error if size is 0
+    /// - Returns `InvalidFileSize` error if size is 0
     /// - Returns corresponding I/O errors if file creation or memory mapping fails
     ///
     /// # Errors
-    /// - 如果 size 为 0，返回 `InvalidInput` 错误
+    /// - 如果 size 为 0，返回 `InvalidFileSize` 错误
     /// - 如果无法创建文件或映射内存，返回相应的 I/O 错误
-    pub fn create(path: impl AsRef<Path>, size: u64) -> io::Result<Self> {
-        if size == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "file size must be greater than 0",
-            ));
-        }
+    pub fn create(path: impl AsRef<Path>, size: NonZeroU64) -> Result<Self> {
 
         let path = path.as_ref();
 
@@ -175,7 +172,7 @@ impl MmapFileInner {
             .truncate(true)
             .open(path)?;
 
-        file.set_len(size)?;
+        file.set_len(size.get())?;
 
         // Create memory mapping
         // 创建内存映射
@@ -204,19 +201,20 @@ impl MmapFileInner {
     /// # Examples
     ///
     /// ```
-    /// # use ranged_mmap::MmapFileInner;
+    /// # use ranged_mmap::{MmapFileInner, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("existing.bin");
+    /// # use std::num::NonZeroU64;
     /// # // Create file first
     /// # // 先创建文件
-    /// # let _ = MmapFileInner::create(&path, 1024)?;
+    /// # let _ = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
     /// let file = MmapFileInner::open(&path)?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
 
         let file = OpenOptions::new()
@@ -224,14 +222,10 @@ impl MmapFileInner {
             .write(true)
             .open(path)?;
 
-        let size = file.metadata()?.len();
-
-        if size == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "cannot map empty file",
-            ));
-        }
+        let size = match file.metadata()?.len() {
+            0 => return Err(Error::EmptyFile),
+            size => NonZeroU64::new(size).unwrap(),
+        };
 
         let mmap = unsafe { MmapMut::map_mut(&file)? };
 
@@ -283,12 +277,13 @@ impl MmapFileInner {
     /// # Examples
     ///
     /// ```
-    /// # use ranged_mmap::MmapFileInner;
+    /// # use ranged_mmap::{MmapFileInner, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("output.bin");
-    /// let file = MmapFileInner::create(&path, 1024)?;
+    /// # use std::num::NonZeroU64;
+    /// let file = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
     ///
     /// // Concurrent writes to non-overlapping regions using std::thread
     /// // 使用 std::thread 并发写入不重叠区域
@@ -308,30 +303,28 @@ impl MmapFileInner {
     /// ```
     ///
     /// # Errors
-    /// Returns `InvalidInput` error if `offset + data.len()` exceeds file size
+    /// Returns `WriteExceedsFileSize` error if `offset + data.len()` exceeds file size
     ///
     /// # Errors
-    /// 如果 `offset + data.len()` 超出文件大小，返回 `InvalidInput` 错误
+    /// 如果 `offset + data.len()` 超出文件大小，返回 `WriteExceedsFileSize` 错误
     #[inline]
-    pub unsafe fn write_at(&self, offset: u64, data: &[u8]) -> io::Result<usize> {
-        let offset = offset as usize;
+    pub unsafe fn write_at(&self, offset: u64, data: &[u8]) -> Result<usize> {
+        let offset_usize = offset as usize;
         let len = data.len();
 
-        if offset.saturating_add(len) > self.size as usize {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "write would exceed file size: offset={}, len={}, file_size={}",
-                    offset, len, self.size
-                ),
-            ));
+        if offset_usize.saturating_add(len) > self.size.get() as usize {
+            return Err(Error::WriteExceedsFileSize {
+                offset,
+                len,
+                file_size: self.size.get(),
+            });
         }
 
         // Safety: We assume the caller ensures different threads don't write to overlapping regions
         // Safety: 我们假设调用者确保不同线程不会写入重叠区域
         unsafe {
             let mmap = &mut *self.mmap.get();
-            mmap[offset..offset + len].copy_from_slice(data);
+            mmap[offset_usize..offset_usize + len].copy_from_slice(data);
         }
 
         Ok(len)
@@ -367,12 +360,12 @@ impl MmapFileInner {
     /// - `data`: 要写入的数据
     ///
     /// # Errors
-    /// Returns `InvalidInput` error if all data cannot be written (exceeds file size)
+    /// Returns `WriteExceedsFileSize` error if all data cannot be written (exceeds file size)
     ///
     /// # Errors
-    /// 如果无法写入所有数据（超出文件大小），返回 `InvalidInput` 错误
+    /// 如果无法写入所有数据（超出文件大小），返回 `WriteExceedsFileSize` 错误
     #[inline]
-    pub unsafe fn write_all_at(&self, offset: u64, data: &[u8]) -> io::Result<()> {
+    pub unsafe fn write_all_at(&self, offset: u64, data: &[u8]) -> Result<()> {
         unsafe { self.write_at(offset, data)?; }
         Ok(())
     }
@@ -409,21 +402,21 @@ impl MmapFileInner {
     ///
     /// # 返回值
     /// 返回实际读取的字节数
-    pub unsafe fn read_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
-        let offset = offset as usize;
+    pub unsafe fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        let offset_usize = offset as usize;
         let len = buf.len();
 
-        if offset >= self.size as usize {
+        if offset_usize >= self.size.get() as usize {
             return Ok(0);
         }
 
-        let available = (self.size as usize).saturating_sub(offset).min(len);
+        let available = (self.size.get() as usize).saturating_sub(offset_usize).min(len);
 
         // Safety: Read operation is safe as long as no concurrent writes to the same region
         // Safety: 读取操作，只要不和写入同一区域并发就是安全的
         unsafe {
             let mmap = &*self.mmap.get();
-            buf[..available].copy_from_slice(&mmap[offset..offset + available]);
+            buf[..available].copy_from_slice(&mmap[offset_usize..offset_usize + available]);
         }
 
         Ok(available)
@@ -453,12 +446,13 @@ impl MmapFileInner {
     /// # Examples
     ///
     /// ```
-    /// # use ranged_mmap::MmapFileInner;
+    /// # use ranged_mmap::{MmapFileInner, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("output.bin");
-    /// let file = MmapFileInner::create(&path, 1024)?;
+    /// # use std::num::NonZeroU64;
+    /// let file = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
     /// unsafe {
     ///     file.write_all_at(0, b"important data")?;
     ///     file.flush()?; // Flush asynchronously to disk
@@ -467,10 +461,10 @@ impl MmapFileInner {
     /// # Ok(())
     /// # }
     /// ```
-    pub unsafe fn flush(&self) -> io::Result<()> {
+    pub unsafe fn flush(&self) -> Result<()> {
         unsafe {
             let mmap = &*self.mmap.get();
-            mmap.flush_async()
+            Ok(mmap.flush_async()?)
         }
     }
 
@@ -499,12 +493,13 @@ impl MmapFileInner {
     /// # Examples
     ///
     /// ```
-    /// # use ranged_mmap::MmapFileInner;
+    /// # use ranged_mmap::{MmapFileInner, Result};
     /// # use tempfile::tempdir;
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<()> {
     /// # let dir = tempdir()?;
     /// # let path = dir.path().join("output.bin");
-    /// let file = MmapFileInner::create(&path, 1024)?;
+    /// # use std::num::NonZeroU64;
+    /// let file = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
     /// unsafe {
     ///     file.write_all_at(0, b"critical data")?;
     ///     file.sync_all()?; // Ensure data is written to disk
@@ -513,10 +508,10 @@ impl MmapFileInner {
     /// # Ok(())
     /// # }
     /// ```
-    pub unsafe fn sync_all(&self) -> io::Result<()> {
+    pub unsafe fn sync_all(&self) -> Result<()> {
         unsafe {
             let mmap = &*self.mmap.get();
-            mmap.flush()
+            Ok(mmap.flush()?)
         }
     }
 
@@ -544,19 +539,20 @@ impl MmapFileInner {
     /// # 参数
     /// - `offset`: 刷新区域的起始位置
     /// - `len`: 刷新区域的长度
-    pub unsafe fn flush_range(&self, offset: u64, len: usize) -> io::Result<()> {
-        let offset = offset as usize;
+    pub unsafe fn flush_range(&self, offset: u64, len: usize) -> Result<()> {
+        let offset_usize = offset as usize;
 
-        if offset.saturating_add(len) > self.size as usize {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "flush range exceeds file size",
-            ));
+        if offset_usize.saturating_add(len) > self.size.get() as usize {
+            return Err(Error::FlushRangeExceedsFileSize {
+                offset,
+                len,
+                file_size: self.size.get(),
+            });
         }
 
         unsafe {
             let mmap = &*self.mmap.get();
-            mmap.flush_async_range(offset, len)
+            Ok(mmap.flush_async_range(offset_usize, len)?)
         }
     }
 
@@ -564,7 +560,7 @@ impl MmapFileInner {
     /// 
     /// 获取文件大小
     #[inline]
-    pub fn size(&self) -> u64 {
+    pub fn size(&self) -> NonZeroU64 {
         self.size
     }
 
@@ -591,7 +587,7 @@ impl MmapFileInner {
     ///
     /// # 参数
     /// - `byte`: 填充字节
-    pub unsafe fn fill(&self, byte: u8) -> io::Result<()> {
+    pub unsafe fn fill(&self, byte: u8) -> Result<()> {
         unsafe {
             let mmap = &mut *self.mmap.get();
             mmap.fill(byte);
@@ -616,7 +612,7 @@ impl MmapFileInner {
     /// 
     /// 调用者需要确保在清零期间没有其他线程正在读写文件的任何部分。
     /// 此操作会修改整个文件内容。
-    pub unsafe fn zero(&self) -> io::Result<()> {
+    pub unsafe fn zero(&self) -> Result<()> {
         unsafe { self.fill(0) }
     }
 
@@ -643,7 +639,7 @@ impl MmapFileInner {
     /// # 参数
     /// - `offset`: 读取起始位置
     /// - `len`: 读取长度
-    pub unsafe fn read_slice(&self, offset: u64, len: usize) -> io::Result<Vec<u8>> {
+    pub unsafe fn read_slice(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
         let mut buf = vec![0u8; len];
         let bytes_read = unsafe { self.read_at(offset, &mut buf)? };
         buf.truncate(bytes_read);

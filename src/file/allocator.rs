@@ -3,6 +3,8 @@
 //! Range 分配器实现
 
 use super::range::AllocatedRange;
+use super::error::{Error, Result};
+use std::num::NonZeroU64;
 
 /// Sequential range allocator for file regions
 /// 
@@ -19,15 +21,16 @@ use super::range::AllocatedRange;
 /// 
 /// ```ignore
 /// # use ranged_mmap::RangeAllocator;
-/// let mut allocator = RangeAllocator::new(1000);
+/// # use std::num::NonZeroU64;
+/// let mut allocator = RangeAllocator::new(NonZeroU64::new(1000).unwrap());
 ///
 /// // Allocate 100 bytes
 /// // 分配 100 字节
-/// let range1 = allocator.allocate(100).unwrap();
+/// let range1 = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
 /// assert_eq!(range1.start(), 0);
 /// assert_eq!(range1.end(), 100);
 ///
-/// let range2 = allocator.allocate(150).unwrap();
+/// let range2 = allocator.allocate(NonZeroU64::new(150).unwrap()).unwrap();
 /// assert_eq!(range2.start(), 100);
 /// assert_eq!(range2.end(), 250);
 ///
@@ -42,7 +45,7 @@ pub struct RangeAllocator {
     /// Total file size
     /// 
     /// 文件总大小
-    total_size: u64,
+    total_size: NonZeroU64,
 }
 
 impl RangeAllocator {
@@ -56,7 +59,7 @@ impl RangeAllocator {
     /// # 参数
     /// - `total_size`: 文件总大小（字节）
     #[inline]
-    pub(crate) fn new(total_size: u64) -> Self {
+    pub(crate) fn new(total_size: NonZeroU64) -> Self {
         Self {
             next_pos: 0,
             total_size,
@@ -67,33 +70,37 @@ impl RangeAllocator {
     /// 
     /// 分配指定大小的范围
     /// 
-    /// Allocates from the current unallocated position. Returns `None` if
+    /// Allocates from the current unallocated position. Returns an error if
     /// insufficient space is available.
     /// 
-    /// 从当前未分配位置开始分配。如果空间不足则返回 `None`。
+    /// 从当前未分配位置开始分配。如果空间不足则返回错误。
     /// 
     /// # Parameters
     /// - `size`: Number of bytes to allocate
     /// 
     /// # Returns
-    /// Returns `Some(AllocatedRange)` on success, `None` if insufficient space
+    /// Returns `Ok(AllocatedRange)` on success, `Err` if insufficient space
     /// 
     /// # 参数
     /// - `size`: 要分配的字节数
     /// 
     /// # 返回值
-    /// 成功返回 `Some(AllocatedRange)`，空间不足返回 `None`
+    /// 成功返回 `Ok(AllocatedRange)`，空间不足返回 `Err`
     #[inline]
-    pub fn allocate(&mut self, size: u64) -> Option<AllocatedRange> {
-        if self.next_pos + size > self.total_size {
-            return None;
+    pub fn allocate(&mut self, size: NonZeroU64) -> Result<AllocatedRange> {
+        let available = self.remaining();
+        if self.next_pos + size.get() > self.total_size.get() {
+            return Err(Error::InsufficientSpace {
+                requested: size.get(),
+                available,
+            });
         }
 
         let start = self.next_pos;
-        let end = start + size;
+        let end = start + size.get();
         self.next_pos = end;
 
-        Some(AllocatedRange::from_range(start, end))
+        Ok(AllocatedRange::from_range_unchecked(start, end))
     }
 
     /// Get the number of remaining allocatable bytes
@@ -107,14 +114,14 @@ impl RangeAllocator {
     /// 返回还未分配的字节数
     #[inline]
     pub fn remaining(&self) -> u64 {
-        self.total_size.saturating_sub(self.next_pos)
+        self.total_size.get().saturating_sub(self.next_pos)
     }
 
     /// Get the total size
     /// 
     /// 获取总大小
     #[inline]
-    pub fn total_size(&self) -> u64 {
+    pub fn total_size(&self) -> NonZeroU64 {
         self.total_size
     }
 

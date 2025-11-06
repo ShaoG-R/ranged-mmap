@@ -4,6 +4,7 @@ use tempfile::tempdir;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use std::io::SeekFrom;
+use std::num::NonZeroU64;
 
 /// 测试参数
 const FILE_SIZE: u64 = 1024 * 1024 * 500; // 500MB
@@ -80,7 +81,7 @@ async fn bench_mmap_file_tokio() {
     let path = dir.path().join("mmap_tokio_test.bin");
 
     // 创建文件并获取分配器
-    let (file, mut allocator) = MmapFile::create(&path, FILE_SIZE).unwrap();
+    let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(FILE_SIZE).unwrap()).unwrap();
 
     // 计算总共有多少个chunk
     let total_chunks = (FILE_SIZE as usize + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -95,7 +96,7 @@ async fn bench_mmap_file_tokio() {
             CHUNK_SIZE as u64
         };
         
-        ranges.push((chunk_idx, allocator.allocate(size).unwrap()));
+        ranges.push((chunk_idx, allocator.allocate(NonZeroU64::new(size).unwrap()).unwrap()));
     }
     
     // 使用 NUM_WORKERS 个并发任务写入
@@ -138,7 +139,7 @@ fn bench_mmap_file_threads() {
     let path = dir.path().join("mmap_threads_test.bin");
 
     // 创建文件并获取分配器
-    let (file, mut allocator) = MmapFile::create(&path, FILE_SIZE).unwrap();
+    let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(FILE_SIZE).unwrap()).unwrap();
 
     // 计算总共有多少个chunk
     let total_chunks = (FILE_SIZE as usize + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -153,7 +154,7 @@ fn bench_mmap_file_threads() {
             CHUNK_SIZE as u64
         };
         
-        ranges.push((chunk_idx, allocator.allocate(size).unwrap()));
+        ranges.push((chunk_idx, allocator.allocate(NonZeroU64::new(size).unwrap()).unwrap()));
     }
     
     // 使用 NUM_WORKERS 个线程写入
