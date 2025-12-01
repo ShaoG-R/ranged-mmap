@@ -7,8 +7,8 @@ use std::io::SeekFrom;
 use std::num::NonZeroU64;
 
 /// 测试参数
-const FILE_SIZE: u64 = 1024 * 1024 * 500; // 500MB
-const CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10MB
+const FILE_SIZE: u64 = 1024 * 1024 * 512; // 512MB
+const CHUNK_SIZE: usize = 12 * 1024 * 1024; // 12MB
 const NUM_WORKERS: usize = 12; // 12个并发协程/线程
 
 /// 使用 tokio::fs::File 进行分段并发写入
@@ -81,7 +81,7 @@ async fn bench_mmap_file_tokio() {
     let path = dir.path().join("mmap_tokio_test.bin");
 
     // 创建文件并获取分配器
-    let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(FILE_SIZE).unwrap()).unwrap();
+    let (file, mut allocator) = MmapFile::create_default(&path, NonZeroU64::new(FILE_SIZE).unwrap()).unwrap();
 
     // 计算总共有多少个chunk
     let total_chunks = (FILE_SIZE as usize + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -118,7 +118,7 @@ async fn bench_mmap_file_tokio() {
                 let data = vec![chunk_idx as u8; size];
                 
                 // MmapFile 使用 write_range 进行安全的并发写入
-                file_clone.write_range(range, &data).unwrap();
+                file_clone.write_range(range, &data);
             }
         });
         
@@ -139,7 +139,7 @@ fn bench_mmap_file_threads() {
     let path = dir.path().join("mmap_threads_test.bin");
 
     // 创建文件并获取分配器
-    let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(FILE_SIZE).unwrap()).unwrap();
+    let (file, mut allocator) = MmapFile::create_default(&path, NonZeroU64::new(FILE_SIZE).unwrap()).unwrap();
 
     // 计算总共有多少个chunk
     let total_chunks = (FILE_SIZE as usize + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -175,7 +175,7 @@ fn bench_mmap_file_threads() {
                     let data = vec![chunk_idx as u8; size];
                     
                     // MmapFile 使用 write_range 进行安全的并发写入
-                    file_clone.write_range(range, &data).unwrap();
+                    file_clone.write_range(range, &data);
                 }
             });
         }

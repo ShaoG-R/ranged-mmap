@@ -17,6 +17,8 @@ A type-safe, high-performance memory-mapped file library optimized for **lock-fr
 - ⚡ **High Performance**: Optimized for concurrent random writes (see benchmarks)
 - 🔧 **Manual Flushing**: Fine-grained control over when data is synchronized to disk
 - 🌐 **Runtime Agnostic**: Works with any async runtime (tokio, async-std) or without one
+- 📐 **4K Alignment**: All allocations are automatically aligned to 4K boundaries for optimal I/O performance
+- 🔄 **Dual Allocators**: Sequential allocator for single-thread use, wait-free concurrent allocator for multi-thread scenarios
 
 ## When to Use
 
@@ -37,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ranged-mmap = "0.1"
+ranged-mmap = "0.2"
 ```
 
 ### Type-Safe Version (Recommended)
@@ -45,15 +47,20 @@ ranged-mmap = "0.1"
 The `MmapFile` API provides compile-time safety guarantees through range allocation:
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    // Create a 1MB file and range allocator
-    let (file, mut allocator) = MmapFile::create("output.bin", 1024 * 1024)?;
+fn main() -> ranged_mmap::Result<()> {
+    // Create a file (size in 4K units) and range allocator
+    // All allocations are 4K aligned automatically
+    let (file, mut allocator) = MmapFile::create_default(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT * 256).unwrap()  // 1MB (256 * 4K)
+    )?;
 
-    // Allocate non-overlapping ranges in the main thread
-    let range1 = allocator.allocate(512 * 1024).unwrap(); // [0, 512KB)
-    let range2 = allocator.allocate(512 * 1024).unwrap(); // [512KB, 1MB)
+    // Allocate non-overlapping ranges in the main thread (4K aligned)
+    let range1 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap(); // [0, 512KB)
+    let range2 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap(); // [512KB, 1MB)
 
     // Concurrent writes to different ranges (compile-time safe!)
     std::thread::scope(|s| {
@@ -61,13 +68,13 @@ fn main() -> std::io::Result<()> {
         let f2 = file.clone();
         
         s.spawn(move || {
-            let receipt = f1.write_range(range1, &vec![1u8; 512 * 1024]).unwrap();
-            f1.flush_range(receipt).unwrap();
+            let receipt = f1.write_range(range1, &vec![1u8; (ALIGNMENT * 128) as usize]);
+            f1.flush_range(receipt);
         });
         
         s.spawn(move || {
-            let receipt = f2.write_range(range2, &vec![2u8; 512 * 1024]).unwrap();
-            f2.flush_range(receipt).unwrap();
+            let receipt = f2.write_range(range2, &vec![2u8; (ALIGNMENT * 128) as usize]);
+            f2.flush_range(receipt);
         });
     });
 
@@ -83,9 +90,10 @@ For scenarios where you can manually guarantee non-overlapping writes:
 
 ```rust
 use ranged_mmap::MmapFileInner;
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    let file = MmapFileInner::create("output.bin", 1024)?;
+fn main() -> ranged_mmap::Result<()> {
+    let file = MmapFileInner::create("output.bin", NonZeroU64::new(1024).unwrap())?;
 
     let file1 = file.clone();
     let file2 = file.clone();
@@ -93,10 +101,10 @@ fn main() -> std::io::Result<()> {
     std::thread::scope(|s| {
         // ⚠️ Safety: You must ensure non-overlapping regions
         s.spawn(|| unsafe { 
-            file1.write_at(0, &[1; 512]).unwrap();
+            file1.write_at(0, &[1; 512]);
         });
         s.spawn(|| unsafe { 
-            file2.write_at(512, &[2; 512]).unwrap();
+            file2.write_at(512, &[2; 512]);
         });
     });
 
@@ -111,26 +119,39 @@ fn main() -> std::io::Result<()> {
 
 - **`MmapFile`**: Type-safe memory-mapped file with compile-time safety
 - **`MmapFileInner`**: Unsafe high-performance version for manual safety management
-- **`RangeAllocator`**: Allocates non-overlapping file ranges sequentially
+- **`RangeAllocator`**: Trait for range allocators
+- **`allocator::sequential::Allocator`**: Sequential allocator for single-thread use
+- **`allocator::concurrent::Allocator`**: Wait-free concurrent allocator for multi-thread scenarios
 - **`AllocatedRange`**: Represents a valid, non-overlapping file range
 - **`WriteReceipt`**: Proof that a range has been written (enables type-safe flushing)
+- **`ALIGNMENT`**: 4K alignment constant (4096 bytes)
+- **`align_up`**: Function to align values up to 4K boundary
 
 ### Core Methods
 
 #### `MmapFile` (Type-Safe)
 
 ```rust
-// Create file and allocator
-let (file, mut allocator) = MmapFile::create(path, size)?;
+use std::num::NonZeroU64;
+use ranged_mmap::allocator::{sequential, concurrent, ALIGNMENT};
 
-// Allocate ranges (main thread)
-let range = allocator.allocate(1024)?;
+// Create file with default sequential allocator
+let (file, mut allocator) = MmapFile::create_default(path, NonZeroU64::new(size).unwrap())?;
 
-// Write to range (returns receipt)
-let receipt = file.write_range(range, data)?;
+// Or specify allocator type explicitly
+let (file, mut allocator) = MmapFile::create::<sequential::Allocator>(path, NonZeroU64::new(size).unwrap())?;
+
+// Use concurrent allocator for multi-thread allocation
+let (file, allocator) = MmapFile::create::<concurrent::Allocator>(path, NonZeroU64::new(size).unwrap())?;
+
+// Allocate ranges (4K aligned, returns Option)
+let range = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
+
+// Write to range (returns receipt directly)
+let receipt = file.write_range(range, data);
 
 // Flush using receipt
-file.flush_range(receipt)?;
+file.flush_range(receipt);
 
 // Sync all data to disk
 unsafe { file.sync_all()?; }
@@ -139,11 +160,13 @@ unsafe { file.sync_all()?; }
 #### `MmapFileInner` (Unsafe)
 
 ```rust
+use std::num::NonZeroU64;
+
 // Create file
-let file = MmapFileInner::create(path, size)?;
+let file = MmapFileInner::create(path, NonZeroU64::new(size).unwrap())?;
 
 // Write at offset (must ensure non-overlapping)
-unsafe { file.write_at(offset, data)?; }
+unsafe { file.write_at(offset, data); }
 
 // Flush to disk
 unsafe { file.flush()?; }
@@ -155,7 +178,8 @@ unsafe { file.flush()?; }
 
 The type system ensures:
 - ✅ All ranges are allocated through `RangeAllocator`
-- ✅ Ranges are allocated sequentially, preventing overlaps
+- ✅ Ranges are allocated sequentially/atomically, preventing overlaps
+- ✅ All allocations are 4K aligned for optimal I/O performance
 - ✅ Data length must match range length
 - ✅ Only written ranges can be flushed (via `WriteReceipt`)
 
@@ -178,38 +202,76 @@ See `benches/concurrent_write.rs` for detailed benchmarks.
 
 ## Advanced Usage
 
+### With Concurrent Allocator (Multi-Thread Allocation)
+
+```rust
+use ranged_mmap::{MmapFile, allocator::{concurrent, ALIGNMENT}};
+use std::num::NonZeroU64;
+use std::sync::Arc;
+
+fn main() -> ranged_mmap::Result<()> {
+    // Use concurrent allocator for wait-free allocation from multiple threads
+    let (file, allocator) = MmapFile::create::<concurrent::Allocator>(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT * 100).unwrap()
+    )?;
+    let allocator = Arc::new(allocator);
+    
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            let f = file.clone();
+            let alloc = Arc::clone(&allocator);
+            s.spawn(move || {
+                // Each thread can allocate independently (wait-free)
+                while let Some(range) = alloc.allocate(NonZeroU64::new(ALIGNMENT).unwrap()) {
+                    let receipt = f.write_range(range, &vec![42u8; ALIGNMENT as usize]);
+                    f.flush_range(receipt);
+                }
+            });
+        }
+    });
+    
+    unsafe { file.sync_all()?; }
+    Ok(())
+}
+```
+
 ### With Tokio Runtime
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 use tokio::task;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let (file, mut allocator) = MmapFile::create("output.bin", 1024 * 1024)?;
+async fn main() -> ranged_mmap::Result<()> {
+    let (file, mut allocator) = MmapFile::create_default(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT * 256).unwrap()  // 1MB
+    )?;
     
-    // Allocate ranges
-    let range1 = allocator.allocate(512 * 1024).unwrap();
-    let range2 = allocator.allocate(512 * 1024).unwrap();
+    // Allocate ranges (4K aligned)
+    let range1 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap();
+    let range2 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap();
     
     // Spawn async tasks
     let f1 = file.clone();
     let f2 = file.clone();
     
     let task1 = task::spawn_blocking(move || {
-        f1.write_range(range1, &vec![1u8; 512 * 1024])
+        f1.write_range(range1, &vec![1u8; (ALIGNMENT * 128) as usize])
     });
     
     let task2 = task::spawn_blocking(move || {
-        f2.write_range(range2, &vec![2u8; 512 * 1024])
+        f2.write_range(range2, &vec![2u8; (ALIGNMENT * 128) as usize])
     });
     
-    let receipt1 = task1.await.unwrap()?;
-    let receipt2 = task2.await.unwrap()?;
+    let receipt1 = task1.await.unwrap();
+    let receipt2 = task2.await.unwrap();
     
     // Flush specific ranges
-    file.flush_range(receipt1)?;
-    file.flush_range(receipt2)?;
+    file.flush_range(receipt1);
+    file.flush_range(receipt2);
     
     unsafe { file.sync_all()?; }
     Ok(())
@@ -219,20 +281,25 @@ async fn main() -> std::io::Result<()> {
 ### Reading Data
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    let (file, mut allocator) = MmapFile::create("output.bin", 1024)?;
-    let range = allocator.allocate(100).unwrap();
+fn main() -> ranged_mmap::Result<()> {
+    let (file, mut allocator) = MmapFile::create_default(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT).unwrap()
+    )?;
+    // Allocations are 4K aligned
+    let range = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
     
-    // Write data
-    file.write_range(range, &[42u8; 100])?;
+    // Write data (data length must match range length)
+    file.write_range(range, &vec![42u8; ALIGNMENT as usize]);
     
     // Read back
-    let mut buf = vec![0u8; 100];
+    let mut buf = vec![0u8; ALIGNMENT as usize];
     file.read_range(range, &mut buf)?;
     
-    assert_eq!(buf, vec![42u8; 100]);
+    assert_eq!(buf[0], 42u8);
     Ok(())
 }
 ```
@@ -240,18 +307,19 @@ fn main() -> std::io::Result<()> {
 ### Opening Existing Files
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    // Open existing file
-    let (file, mut allocator) = MmapFile::open("existing.bin")?;
+fn main() -> ranged_mmap::Result<()> {
+    // Open existing file with default sequential allocator
+    let (file, mut allocator) = MmapFile::open_default("existing.bin")?;
     
     println!("File size: {} bytes", file.size());
     println!("Remaining allocatable: {} bytes", allocator.remaining());
     
-    // Continue allocating and writing
-    if let Some(range) = allocator.allocate(1024) {
-        file.write_range(range, &[0u8; 1024])?;
+    // Continue allocating and writing (4K aligned)
+    if let Some(range) = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()) {
+        file.write_range(range, &vec![0u8; ALIGNMENT as usize]);
     }
     
     Ok(())
@@ -268,10 +336,13 @@ fn main() -> std::io::Result<()> {
 ## How It Works
 
 1. **Memory Mapping**: The file is memory-mapped using `memmap2`, making it accessible as a continuous memory region
-2. **Range Allocation**: `RangeAllocator` sequentially allocates non-overlapping ranges
-3. **Type Safety**: `AllocatedRange` can only be created through the allocator, guaranteeing validity
-4. **Lock-Free Writes**: Each thread writes to its own `AllocatedRange`, avoiding locks
-5. **Manual Flushing**: Users control when data is synchronized to disk for optimal performance
+2. **Range Allocation**: Allocators provide non-overlapping ranges:
+   - `sequential::Allocator`: Simple sequential allocation for single-thread use
+   - `concurrent::Allocator`: Wait-free atomic allocation for multi-thread scenarios
+3. **4K Alignment**: All allocations are aligned to 4K boundaries for optimal I/O performance
+4. **Type Safety**: `AllocatedRange` can only be created through the allocator, guaranteeing validity
+5. **Lock-Free Writes**: Each thread writes to its own `AllocatedRange`, avoiding locks
+6. **Manual Flushing**: Users control when data is synchronized to disk for optimal performance
 
 ## Comparison
 

@@ -304,23 +304,16 @@ impl MmapFileInner {
     /// # }
     /// ```
     ///
-    /// # Errors
-    /// Returns `WriteExceedsFileSize` error if `offset + data.len()` exceeds file size
-    ///
-    /// # Errors
-    /// 如果 `offset + data.len()` 超出文件大小，返回 `WriteExceedsFileSize` 错误
     #[inline]
-    pub unsafe fn write_at(&self, offset: u64, data: &[u8]) -> Result<usize> {
+    pub unsafe fn write_at(&self, offset: u64, data: &[u8]) -> usize {
         let offset_usize = offset as usize;
         let len = data.len();
 
-        if offset_usize.saturating_add(len) > self.size.get() as usize {
-            return Err(Error::WriteExceedsFileSize {
-                offset,
-                len,
-                file_size: self.size.get(),
-            });
-        }
+        debug_assert!(
+            offset_usize.saturating_add(len) <= self.size.get() as usize,
+            "Write would exceed file size: offset={}, len={}, file_size={}",
+            offset, len, self.size.get()
+        );
 
         // Safety: We assume the caller ensures different threads don't write to overlapping regions
         // Safety: 我们假设调用者确保不同线程不会写入重叠区域
@@ -329,7 +322,7 @@ impl MmapFileInner {
             mmap[offset_usize..offset_usize + len].copy_from_slice(data);
         }
 
-        Ok(len)
+        len
     }
 
     /// Write all data at the specified position
@@ -361,15 +354,9 @@ impl MmapFileInner {
     /// - `offset`: 写入位置
     /// - `data`: 要写入的数据
     ///
-    /// # Errors
-    /// Returns `WriteExceedsFileSize` error if all data cannot be written (exceeds file size)
-    ///
-    /// # Errors
-    /// 如果无法写入所有数据（超出文件大小），返回 `WriteExceedsFileSize` 错误
     #[inline]
-    pub unsafe fn write_all_at(&self, offset: u64, data: &[u8]) -> Result<()> {
-        unsafe { self.write_at(offset, data)?; }
-        Ok(())
+    pub unsafe fn write_all_at(&self, offset: u64, data: &[u8]) {
+        unsafe { self.write_at(offset, data); }
     }
 
     /// Read data at the specified position
@@ -456,7 +443,7 @@ impl MmapFileInner {
     /// # use std::num::NonZeroU64;
     /// let file = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
     /// unsafe {
-    ///     file.write_all_at(0, b"important data")?;
+    ///     file.write_all_at(0, b"important data");
     ///     file.flush()?; // Flush asynchronously to disk
     ///                    // 异步刷新到磁盘
     /// }
@@ -503,7 +490,7 @@ impl MmapFileInner {
     /// # use std::num::NonZeroU64;
     /// let file = MmapFileInner::create(&path, NonZeroU64::new(1024).unwrap())?;
     /// unsafe {
-    ///     file.write_all_at(0, b"critical data")?;
+    ///     file.write_all_at(0, b"critical data");
     ///     file.sync_all()?; // Ensure data is written to disk
     ///                       // 确保数据已写入磁盘
     /// }
@@ -544,13 +531,11 @@ impl MmapFileInner {
     pub unsafe fn flush_range(&self, offset: u64, len: usize) -> Result<()> {
         let offset_usize = offset as usize;
 
-        if offset_usize.saturating_add(len) > self.size.get() as usize {
-            return Err(Error::FlushRangeExceedsFileSize {
-                offset,
-                len,
-                file_size: self.size.get(),
-            });
-        }
+        debug_assert!(
+            offset_usize.saturating_add(len) <= self.size.get() as usize,
+            "Flush range exceeds file size: offset={}, len={}, file_size={}",
+            offset, len, self.size.get()
+        );
 
         unsafe {
             let mmap = &*self.mmap.get();

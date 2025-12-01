@@ -25,23 +25,6 @@ pub enum Error {
     /// 无效的范围（start > end 或空范围）
     InvalidRange { start: u64, end: u64 },
     
-    /// Write would exceed file size
-    /// 
-    /// 写入会超出文件大小
-    WriteExceedsFileSize {
-        offset: u64,
-        len: usize,
-        file_size: u64,
-    },
-    
-    /// Data length doesn't match range length
-    /// 
-    /// 数据长度与范围长度不匹配
-    DataLengthMismatch {
-        data_len: usize,
-        range_len: u64,
-    },
-    
     /// Buffer too small for range
     /// 
     /// 缓冲区太小
@@ -49,23 +32,7 @@ pub enum Error {
         buffer_len: usize,
         range_len: u64,
     },
-    
-    /// Flush range exceeds file size
-    /// 
-    /// 刷新范围超出文件大小
-    FlushRangeExceedsFileSize {
-        offset: u64,
-        len: usize,
-        file_size: u64,
-    },
-    
-    /// Insufficient space for allocation
-    /// 
-    /// 分配空间不足
-    InsufficientSpace {
-        requested: u64,
-        available: u64,
-    },
+
 }
 
 impl fmt::Display for Error {
@@ -76,39 +43,11 @@ impl fmt::Display for Error {
             Error::InvalidRange { start, end } => {
                 write!(f, "Invalid range: start={}, end={} (start must be <= end) / 无效的范围：start={}, end={}（start 必须小于等于 end）", start, end, start, end)
             }
-            Error::WriteExceedsFileSize { offset, len, file_size } => {
-                write!(
-                    f,
-                    "Write would exceed file size: offset={}, len={}, file_size={} / 写入会超出文件大小：offset={}, len={}, file_size={}",
-                    offset, len, file_size, offset, len, file_size
-                )
-            }
-            Error::DataLengthMismatch { data_len, range_len } => {
-                write!(
-                    f,
-                    "Data length {} doesn't match range length {} / 数据长度 {} 与范围长度 {} 不匹配",
-                    data_len, range_len, data_len, range_len
-                )
-            }
             Error::BufferTooSmall { buffer_len, range_len } => {
                 write!(
                     f,
                     "Buffer length {} is smaller than range length {} / 缓冲区长度 {} 小于范围长度 {}",
                     buffer_len, range_len, buffer_len, range_len
-                )
-            }
-            Error::FlushRangeExceedsFileSize { offset, len, file_size } => {
-                write!(
-                    f,
-                    "Flush range exceeds file size: offset={}, len={}, file_size={} / 刷新范围超出文件大小：offset={}, len={}, file_size={}",
-                    offset, len, file_size, offset, len, file_size
-                )
-            }
-            Error::InsufficientSpace { requested, available } => {
-                write!(
-                    f,
-                    "Insufficient space: requested {} bytes, available {} bytes / 空间不足：请求 {} 字节，可用 {} 字节",
-                    requested, available, requested, available
                 )
             }
         }
@@ -142,11 +81,7 @@ impl From<Error> for io::Error {
             Error::Io(io_err) => io_err,
             Error::EmptyFile => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
             Error::InvalidRange { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
-            Error::WriteExceedsFileSize { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
-            Error::DataLengthMismatch { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
-            Error::BufferTooSmall { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
-            Error::FlushRangeExceedsFileSize { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
-            Error::InsufficientSpace { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
+            Error::BufferTooSmall { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string())
         }
     }
 }

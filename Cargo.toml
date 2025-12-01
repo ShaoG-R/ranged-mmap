@@ -1,6 +1,6 @@
 [package]
 name = "ranged-mmap"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 authors = ["ShaoG <shaog.rs@gmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -22,6 +22,11 @@ exclude = [
 
 [dependencies]
 memmap2 = "0.9.9"
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
 
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["full"] }

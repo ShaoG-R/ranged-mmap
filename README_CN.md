@@ -17,6 +17,8 @@
 - ⚡ **高性能**：专为并发随机写入优化（参见性能测试）
 - 🔧 **手动刷盘**：精细控制何时将数据同步到磁盘
 - 🌐 **运行时无关**：可与任何异步运行时（tokio、async-std）配合使用，或不使用运行时
+- 📐 **4K 对齐**：所有分配自动对齐到 4K 边界，实现最佳 I/O 性能
+- 🔄 **双分配器**：顺序分配器用于单线程，无等待并发分配器用于多线程场景
 
 ## 使用场景
 
@@ -37,7 +39,7 @@
 
 ```toml
 [dependencies]
-ranged-mmap = "0.1"
+ranged-mmap = "0.2"
 ```
 
 ### 类型安全版本（推荐）
@@ -45,15 +47,20 @@ ranged-mmap = "0.1"
 `MmapFile` API 通过范围分配提供编译期安全保证：
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    // 创建 1MB 文件和范围分配器
-    let (file, mut allocator) = MmapFile::create("output.bin", 1024 * 1024)?;
+fn main() -> ranged_mmap::Result<()> {
+    // 创建文件（大小以 4K 为单位）和范围分配器
+    // 所有分配自动 4K 对齐
+    let (file, mut allocator) = MmapFile::create_default(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT * 256).unwrap()  // 1MB (256 * 4K)
+    )?;
 
-    // 在主线程分配不重叠的范围
-    let range1 = allocator.allocate(512 * 1024).unwrap(); // [0, 512KB)
-    let range2 = allocator.allocate(512 * 1024).unwrap(); // [512KB, 1MB)
+    // 在主线程分配不重叠的范围（4K 对齐）
+    let range1 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap(); // [0, 512KB)
+    let range2 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap(); // [512KB, 1MB)
 
     // 并发写入不同范围（编译期安全！）
     std::thread::scope(|s| {
@@ -61,12 +68,12 @@ fn main() -> std::io::Result<()> {
         let f2 = file.clone();
         
         s.spawn(move || {
-            let receipt = f1.write_range(range1, &vec![1u8; 512 * 1024]).unwrap();
+            let receipt = f1.write_range(range1, &vec![1u8; (ALIGNMENT * 128) as usize]);
             f1.flush_range(receipt).unwrap();
         });
         
         s.spawn(move || {
-            let receipt = f2.write_range(range2, &vec![2u8; 512 * 1024]).unwrap();
+            let receipt = f2.write_range(range2, &vec![2u8; (ALIGNMENT * 128) as usize]);
             f2.flush_range(receipt).unwrap();
         });
     });
@@ -83,9 +90,10 @@ fn main() -> std::io::Result<()> {
 
 ```rust
 use ranged_mmap::MmapFileInner;
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    let file = MmapFileInner::create("output.bin", 1024)?;
+fn main() -> ranged_mmap::Result<()> {
+    let file = MmapFileInner::create("output.bin", NonZeroU64::new(1024).unwrap())?;
 
     let file1 = file.clone();
     let file2 = file.clone();
@@ -93,10 +101,10 @@ fn main() -> std::io::Result<()> {
     std::thread::scope(|s| {
         // ⚠️ 安全性：你必须确保区域不重叠
         s.spawn(|| unsafe { 
-            file1.write_at(0, &[1; 512]).unwrap();
+            file1.write_at(0, &[1; 512]);
         });
         s.spawn(|| unsafe { 
-            file2.write_at(512, &[2; 512]).unwrap();
+            file2.write_at(512, &[2; 512]);
         });
     });
 
@@ -111,23 +119,36 @@ fn main() -> std::io::Result<()> {
 
 - **`MmapFile`**：类型安全的内存映射文件，提供编译期安全保证
 - **`MmapFileInner`**：Unsafe 高性能版本，需要手动管理安全性
-- **`RangeAllocator`**：顺序分配不重叠的文件范围
+- **`RangeAllocator`**：范围分配器 trait
+- **`allocator::sequential::Allocator`**：顺序分配器，用于单线程场景
+- **`allocator::concurrent::Allocator`**：无等待并发分配器，用于多线程场景
 - **`AllocatedRange`**：表示有效且不重叠的文件范围
 - **`WriteReceipt`**：证明范围已被写入的凭据（实现类型安全的刷新）
+- **`ALIGNMENT`**：4K 对齐常量（4096 字节）
+- **`align_up`**：将值向上对齐到 4K 边界的函数
 
 ### 核心方法
 
 #### `MmapFile`（类型安全）
 
 ```rust
-// 创建文件和分配器
-let (file, mut allocator) = MmapFile::create(path, size)?;
+use std::num::NonZeroU64;
+use ranged_mmap::allocator::{sequential, concurrent, ALIGNMENT};
 
-// 分配范围（主线程）
-let range = allocator.allocate(1024)?;
+// 使用默认顺序分配器创建文件
+let (file, mut allocator) = MmapFile::create_default(path, NonZeroU64::new(size).unwrap())?;
 
-// 写入范围（返回凭据）
-let receipt = file.write_range(range, data)?;
+// 或显式指定分配器类型
+let (file, mut allocator) = MmapFile::create::<sequential::Allocator>(path, NonZeroU64::new(size).unwrap())?;
+
+// 使用并发分配器进行多线程分配
+let (file, allocator) = MmapFile::create::<concurrent::Allocator>(path, NonZeroU64::new(size).unwrap())?;
+
+// 分配范围（4K 对齐，返回 Option）
+let range = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
+
+// 写入范围（直接返回凭据）
+let receipt = file.write_range(range, data);
 
 // 使用凭据刷新
 file.flush_range(receipt)?;
@@ -139,11 +160,13 @@ unsafe { file.sync_all()?; }
 #### `MmapFileInner`（Unsafe）
 
 ```rust
+use std::num::NonZeroU64;
+
 // 创建文件
-let file = MmapFileInner::create(path, size)?;
+let file = MmapFileInner::create(path, NonZeroU64::new(size).unwrap())?;
 
 // 在指定偏移处写入（必须确保不重叠）
-unsafe { file.write_at(offset, data)?; }
+unsafe { file.write_at(offset, data); }
 
 // 刷新到磁盘
 unsafe { file.flush()?; }
@@ -155,7 +178,8 @@ unsafe { file.flush()?; }
 
 类型系统确保：
 - ✅ 所有范围都通过 `RangeAllocator` 分配
-- ✅ 范围顺序分配，防止重叠
+- ✅ 范围顺序/原子分配，防止重叠
+- ✅ 所有分配都 4K 对齐，实现最佳 I/O 性能
 - ✅ 数据长度必须匹配范围长度
 - ✅ 只能刷新已写入的范围（通过 `WriteReceipt`）
 
@@ -178,34 +202,72 @@ unsafe { file.flush()?; }
 
 ## 高级用法
 
+### 使用并发分配器（多线程分配）
+
+```rust
+use ranged_mmap::{MmapFile, allocator::{concurrent, ALIGNMENT}};
+use std::num::NonZeroU64;
+use std::sync::Arc;
+
+fn main() -> ranged_mmap::Result<()> {
+    // 使用并发分配器实现多线程无等待分配
+    let (file, allocator) = MmapFile::create::<concurrent::Allocator>(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT * 100).unwrap()
+    )?;
+    let allocator = Arc::new(allocator);
+    
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            let f = file.clone();
+            let alloc = Arc::clone(&allocator);
+            s.spawn(move || {
+                // 每个线程可以独立分配（无等待）
+                while let Some(range) = alloc.allocate(NonZeroU64::new(ALIGNMENT).unwrap()) {
+                    let receipt = f.write_range(range, &vec![42u8; ALIGNMENT as usize]);
+                    f.flush_range(receipt).unwrap();
+                }
+            });
+        }
+    });
+    
+    unsafe { file.sync_all()?; }
+    Ok(())
+}
+```
+
 ### 与 Tokio 运行时配合
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 use tokio::task;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let (file, mut allocator) = MmapFile::create("output.bin", 1024 * 1024)?;
+async fn main() -> ranged_mmap::Result<()> {
+    let (file, mut allocator) = MmapFile::create_default(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT * 256).unwrap()  // 1MB
+    )?;
     
-    // 分配范围
-    let range1 = allocator.allocate(512 * 1024).unwrap();
-    let range2 = allocator.allocate(512 * 1024).unwrap();
+    // 分配范围（4K 对齐）
+    let range1 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap();
+    let range2 = allocator.allocate(NonZeroU64::new(ALIGNMENT * 128).unwrap()).unwrap();
     
     // 派生异步任务
     let f1 = file.clone();
     let f2 = file.clone();
     
     let task1 = task::spawn_blocking(move || {
-        f1.write_range(range1, &vec![1u8; 512 * 1024])
+        f1.write_range(range1, &vec![1u8; (ALIGNMENT * 128) as usize])
     });
     
     let task2 = task::spawn_blocking(move || {
-        f2.write_range(range2, &vec![2u8; 512 * 1024])
+        f2.write_range(range2, &vec![2u8; (ALIGNMENT * 128) as usize])
     });
     
-    let receipt1 = task1.await.unwrap()?;
-    let receipt2 = task2.await.unwrap()?;
+    let receipt1 = task1.await.unwrap();
+    let receipt2 = task2.await.unwrap();
     
     // 刷新特定范围
     file.flush_range(receipt1)?;
@@ -219,20 +281,25 @@ async fn main() -> std::io::Result<()> {
 ### 读取数据
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    let (file, mut allocator) = MmapFile::create("output.bin", 1024)?;
-    let range = allocator.allocate(100).unwrap();
+fn main() -> ranged_mmap::Result<()> {
+    let (file, mut allocator) = MmapFile::create_default(
+        "output.bin",
+        NonZeroU64::new(ALIGNMENT).unwrap()
+    )?;
+    // 分配是 4K 对齐的
+    let range = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
     
-    // 写入数据
-    file.write_range(range, &[42u8; 100])?;
+    // 写入数据（数据长度必须匹配范围长度）
+    file.write_range(range, &vec![42u8; ALIGNMENT as usize]);
     
     // 读回数据
-    let mut buf = vec![0u8; 100];
+    let mut buf = vec![0u8; ALIGNMENT as usize];
     file.read_range(range, &mut buf)?;
     
-    assert_eq!(buf, vec![42u8; 100]);
+    assert_eq!(buf[0], 42u8);
     Ok(())
 }
 ```
@@ -240,18 +307,19 @@ fn main() -> std::io::Result<()> {
 ### 打开已存在的文件
 
 ```rust
-use ranged_mmap::MmapFile;
+use ranged_mmap::{MmapFile, allocator::ALIGNMENT};
+use std::num::NonZeroU64;
 
-fn main() -> std::io::Result<()> {
-    // 打开已存在的文件
-    let (file, mut allocator) = MmapFile::open("existing.bin")?;
+fn main() -> ranged_mmap::Result<()> {
+    // 使用默认顺序分配器打开已存在的文件
+    let (file, mut allocator) = MmapFile::open_default("existing.bin")?;
     
     println!("文件大小: {} 字节", file.size());
     println!("剩余可分配: {} 字节", allocator.remaining());
     
-    // 继续分配和写入
-    if let Some(range) = allocator.allocate(1024) {
-        file.write_range(range, &[0u8; 1024])?;
+    // 继续分配和写入（4K 对齐）
+    if let Some(range) = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()) {
+        file.write_range(range, &vec![0u8; ALIGNMENT as usize]);
     }
     
     Ok(())
@@ -268,10 +336,13 @@ fn main() -> std::io::Result<()> {
 ## 工作原理
 
 1. **内存映射**：使用 `memmap2` 将文件映射为连续的内存区域
-2. **范围分配**：`RangeAllocator` 顺序分配不重叠的范围
-3. **类型安全**：`AllocatedRange` 只能通过分配器创建，保证有效性
-4. **无锁写入**：每个线程写入自己的 `AllocatedRange`，避免加锁
-5. **手动刷盘**：用户控制何时将数据同步到磁盘，实现最佳性能
+2. **范围分配**：分配器提供不重叠的范围：
+   - `sequential::Allocator`：简单顺序分配，用于单线程场景
+   - `concurrent::Allocator`：无等待原子分配，用于多线程场景
+3. **4K 对齐**：所有分配都对齐到 4K 边界，实现最佳 I/O 性能
+4. **类型安全**：`AllocatedRange` 只能通过分配器创建，保证有效性
+5. **无锁写入**：每个线程写入自己的 `AllocatedRange`，避免加锁
+6. **手动刷盘**：用户控制何时将数据同步到磁盘，实现最佳性能
 
 ## 对比
 

@@ -46,28 +46,29 @@ use super::error::{Error, Result};
 /// # Examples
 /// 
 /// ```
-/// # use ranged_mmap::{MmapFile, RangeAllocator, Result};
+/// # use ranged_mmap::{MmapFile, Result, allocator::ALIGNMENT};
 /// # use tempfile::tempdir;
 /// # fn main() -> Result<()> {
 /// # let dir = tempdir()?;
 /// # let path = dir.path().join("output.bin");
 /// # use std::num::NonZeroU64;
-/// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(100).unwrap())?;
-/// let range = allocator.allocate(NonZeroU64::new(10).unwrap()).unwrap();
+/// let (file, mut allocator) = MmapFile::create_default(&path, NonZeroU64::new(ALIGNMENT).unwrap())?;
+/// let range = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
 ///
-/// // Get range information
-/// // 获取范围信息
+/// // Get range information (4K aligned)
+/// // 获取范围信息（4K对齐）
 /// assert_eq!(range.start(), 0);
-/// assert_eq!(range.end(), 10);
-/// assert_eq!(range.len(), 10);
+/// assert_eq!(range.end(), ALIGNMENT);
+/// assert_eq!(range.len(), ALIGNMENT);
 ///
 /// let (start, end) = range.as_range_tuple();
 /// assert_eq!(start, 0);
-/// assert_eq!(end, 10);
+/// assert_eq!(end, ALIGNMENT);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AllocatedRange {
     /// Range start position (inclusive)
     /// 
@@ -218,18 +219,18 @@ impl From<AllocatedRange> for Range<u64> {
 /// # Examples
 /// 
 /// ```
-/// # use ranged_mmap::{MmapFile, Result};
+/// # use ranged_mmap::{MmapFile, Result, allocator::ALIGNMENT};
 /// # use tempfile::tempdir;
 /// # fn main() -> Result<()> {
 /// # let dir = tempdir()?;
 /// # let path = dir.path().join("output.bin");
 /// # use std::num::NonZeroU64;
-/// let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
-/// let range = allocator.allocate(NonZeroU64::new(100).unwrap()).unwrap();
+/// let (file, mut allocator) = MmapFile::create_default(&path, NonZeroU64::new(ALIGNMENT).unwrap())?;
+/// let range = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
 ///
 /// // Write and get receipt
 /// // 写入并获得凭据
-/// let receipt = file.write_range(range, &[42u8; 100])?;
+/// let receipt = file.write_range(range, &vec![42u8; ALIGNMENT as usize]);
 ///
 /// // Use receipt to flush the range
 /// // 使用凭据刷新该范围
@@ -238,6 +239,7 @@ impl From<AllocatedRange> for Range<u64> {
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WriteReceipt {
     /// The range that was written
     /// 

@@ -36,29 +36,29 @@
 //! 使用 [`MmapFile`] 和 [`RangeAllocator`] 获得编译期安全：
 //!
 //! ```
-//! use ranged_mmap::{MmapFile, RangeAllocator, Result};
+//! use ranged_mmap::{MmapFile, Result, allocator::ALIGNMENT};
 //! # use tempfile::tempdir;
 //! # fn main() -> Result<()> {
 //! # let dir = tempdir()?;
 //! # let path = dir.path().join("output.bin");
 //! # use std::num::NonZeroU64;
 //!
-//! // Create file and allocator
-//! // 创建文件和分配器
-//! let (file, mut allocator) = MmapFile::create(&path, NonZeroU64::new(1024).unwrap())?;
+//! // Create file and allocator (file size should be 4K aligned)
+//! // 创建文件和分配器（文件大小应为4K对齐）
+//! let (file, mut allocator) = MmapFile::create_default(&path, NonZeroU64::new(ALIGNMENT * 2).unwrap())?;
 //!
-//! // Allocate ranges
-//! // 分配范围
-//! let range1 = allocator.allocate(NonZeroU64::new(512).unwrap()).unwrap();
-//! let range2 = allocator.allocate(NonZeroU64::new(512).unwrap()).unwrap();
+//! // Allocate ranges (allocations are 4K aligned)
+//! // 分配范围（分配是4K对齐的）
+//! let range1 = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
+//! let range2 = allocator.allocate(NonZeroU64::new(ALIGNMENT).unwrap()).unwrap();
 //!
 //! // Concurrent writes (compile-time safe!)
 //! // 并发写入（编译期安全！）
 //! std::thread::scope(|s| {
 //!     let f1 = file.clone();
 //!     let f2 = file.clone();
-//!     s.spawn(move || f1.write_range(range1, &[1; 512]));
-//!     s.spawn(move || f2.write_range(range2, &[2; 512]));
+//!     s.spawn(move || f1.write_range(range1, &vec![1u8; ALIGNMENT as usize]));
+//!     s.spawn(move || f2.write_range(range2, &vec![2u8; ALIGNMENT as usize]));
 //! });
 //!
 //! unsafe { file.sync_all()?; }
@@ -119,4 +119,4 @@
 
 mod file;
 
-pub use file::{AllocatedRange, Error, MmapFile, MmapFileInner, RangeAllocator, Result, WriteReceipt};
+pub use file::*;
