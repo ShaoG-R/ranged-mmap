@@ -108,6 +108,7 @@
 //! - [`RangeAllocator`]: Allocates non-overlapping file ranges
 //! - [`AllocatedRange`]: Represents an allocated file range
 //! - [`WriteReceipt`]: Proof that a range has been written
+//! - [`SplitResult`]: Result of splitting an allocated range at a 4K-aligned position
 //!
 //! # 主要类型
 //!
@@ -116,6 +117,7 @@
 //! - [`RangeAllocator`][]: 分配不重叠的文件范围
 //! - [`AllocatedRange`][]: 表示已分配的文件范围
 //! - [`WriteReceipt`][]: 证明范围已被写入的凭据
+//! - [`SplitResult`][]: 在4K对齐位置拆分已分配范围的结果
 
 mod file;
 
