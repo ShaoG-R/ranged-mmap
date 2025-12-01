@@ -20,11 +20,6 @@ pub enum Error {
     /// 空文件无法映射
     EmptyFile,
     
-    /// Invalid range (start > end or empty range)
-    /// 
-    /// 无效的范围（start > end 或空范围）
-    InvalidRange { start: u64, end: u64 },
-    
     /// Buffer too small for range
     /// 
     /// 缓冲区太小
@@ -40,9 +35,6 @@ impl fmt::Display for Error {
         match self {
             Error::Io(err) => write!(f, "I/O error: {}", err),
             Error::EmptyFile => write!(f, "Cannot map empty file / 无法映射空文件"),
-            Error::InvalidRange { start, end } => {
-                write!(f, "Invalid range: start={}, end={} (start must be <= end) / 无效的范围：start={}, end={}（start 必须小于等于 end）", start, end, start, end)
-            }
             Error::BufferTooSmall { buffer_len, range_len } => {
                 write!(
                     f,
@@ -80,7 +72,6 @@ impl From<Error> for io::Error {
         match err {
             Error::Io(io_err) => io_err,
             Error::EmptyFile => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
-            Error::InvalidRange { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string()),
             Error::BufferTooSmall { .. } => io::Error::new(io::ErrorKind::InvalidInput, err.to_string())
         }
     }

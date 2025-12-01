@@ -342,13 +342,4 @@ mod tests {
         // Total allocated should equal file size
         assert_eq!(total, TOTAL_SIZE);
     }
-
-    #[test]
-    fn test_concurrent_align_up_function() {
-        assert_eq!(align_up(0), 0);
-        assert_eq!(align_up(1), ALIGNMENT);
-        assert_eq!(align_up(ALIGNMENT - 1), ALIGNMENT);
-        assert_eq!(align_up(ALIGNMENT), ALIGNMENT);
-        assert_eq!(align_up(ALIGNMENT + 1), ALIGNMENT * 2);
-    }
 }

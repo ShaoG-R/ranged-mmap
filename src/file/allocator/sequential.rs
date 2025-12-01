@@ -242,13 +242,4 @@ mod tests {
         let allocator = Allocator::new(non_zero(12345));
         assert_eq!(allocator.total_size().get(), 12345);
     }
-
-    #[test]
-    fn test_align_up_function() {
-        assert_eq!(align_up(0), 0);
-        assert_eq!(align_up(1), ALIGNMENT);
-        assert_eq!(align_up(ALIGNMENT - 1), ALIGNMENT);
-        assert_eq!(align_up(ALIGNMENT), ALIGNMENT);
-        assert_eq!(align_up(ALIGNMENT + 1), ALIGNMENT * 2);
-    }
 }

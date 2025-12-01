@@ -39,7 +39,7 @@
 
 ```toml
 [dependencies]
-ranged-mmap = "0.2"
+ranged-mmap = "0.3"
 ```
 
 ### 类型安全版本（推荐）

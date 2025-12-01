@@ -2,8 +2,8 @@
 //! 
 //! 文件范围和写入凭据类型
 
-use std::{num::NonZeroU64, ops::Range};
-use super::error::{Error, Result};
+use std::ops::Range;
+use super::allocator::{align_up, align_down};
 
 /// Allocated file range
 /// 
@@ -139,52 +139,116 @@ impl AllocatedRange {
     }
 
 
-    /// Split the range at the given relative position
+    /// Split the range at the given relative position with 4K upper alignment
     /// 
-    /// 在给定相对位置拆分范围
+    /// 在给定相对位置以4K上对齐方式拆分范围
     /// 
     /// # Parameters
-    /// - `pos`: Relative offset from the start of the range. Must be less than the range length.
+    /// - `pos`: Relative offset from the start of the range.
     /// 
     /// # Returns
-    /// Two new ranges `(left, right)`, or an error if the position is out of bounds.
-    /// - `left`: Range from `start` to `start + pos` (exclusive)
-    /// - `right`: Range from `start + pos` to `end`
+    /// `(left, Option<right>)`:
+    /// - `left`: Range from `start` to `align_up(start + pos)` (4K aligned)
+    /// - `right`: Range from `align_up(start + pos)` to `end`, or `None` if the aligned position >= end or pos > len
     /// 
     /// # 参数
-    /// - `pos`: 从范围起始位置开始的相对偏移量。必须小于范围长度。
+    /// - `pos`: 从范围起始位置开始的相对偏移量。
     /// 
     /// # 返回值
-    /// 两个新的范围 `(left, right)`，如果位置超出范围则返回错误。
-    /// - `left`: 从 `start` 到 `start + pos`（不包含）的范围
-    /// - `right`: 从 `start + pos` 到 `end` 的范围
+    /// `(left, Option<right>)`：
+    /// - `left`: 从 `start` 到 `align_up(start + pos)`（4K对齐）的范围
+    /// - `right`: 从 `align_up(start + pos)` 到 `end` 的范围，如果对齐后的位置 >= end 或 pos > len 则为 `None`
     /// 
     /// # Examples
     /// ```ignore
     /// # use ranged_mmap::file::range::AllocatedRange;
-    /// # use std::num::NonZeroU64;
-    /// let range = AllocatedRange::from_range_unchecked(10, 20); // Range [10, 20)
-    /// let (left, right) = range.split_at(NonZeroU64::new(5).unwrap()).unwrap();
-    /// assert_eq!(left.start(), 10);
-    /// assert_eq!(left.end(), 15);
-    /// assert_eq!(right.start(), 15);
-    /// assert_eq!(right.end(), 20);
+    /// let range = AllocatedRange::from_range_unchecked(0, 8192); // Range [0, 8192)
+    /// let (left, right) = range.split_at_align_up(100);
+    /// assert_eq!(left.start(), 0);
+    /// assert_eq!(left.end(), 4096);  // Aligned up from 100
+    /// assert_eq!(right.unwrap().start(), 4096);
+    /// assert_eq!(right.unwrap().end(), 8192);
     /// ```
     #[inline]
-    pub fn split_at(&self, pos: NonZeroU64) -> Result<(AllocatedRange, AllocatedRange)> {
+    pub fn split_at_align_up(&self, pos: u64) -> (AllocatedRange, Option<AllocatedRange>) {
         let start = self.start;
         let end = self.end;
         let len = self.len();
 
-        if pos.get() > len {
-            return Err(Error::InvalidRange { start, end });
+        if pos > len {
+            return (AllocatedRange::from_range_unchecked(start, end), None);
         }
         
-        let split_point = start + pos.get();
-        Ok((
-            AllocatedRange::from_range_unchecked(start, split_point),
-            AllocatedRange::from_range_unchecked(split_point, end)
-        ))
+        let split_point = align_up(start + pos);
+        
+        if split_point >= end {
+            // Aligned position reaches or exceeds end, no right range
+            (
+                AllocatedRange::from_range_unchecked(start, end),
+                None
+            )
+        } else {
+            (
+                AllocatedRange::from_range_unchecked(start, split_point),
+                Some(AllocatedRange::from_range_unchecked(split_point, end))
+            )
+        }
+    }
+
+    /// Split the range at the given relative position with 4K lower alignment
+    /// 
+    /// 在给定相对位置以4K下对齐方式拆分范围
+    /// 
+    /// # Parameters
+    /// - `pos`: Relative offset from the start of the range.
+    /// 
+    /// # Returns
+    /// `(Option<left>, right)`:
+    /// - `left`: Range from `start` to `align_down(start + pos)`, or `None` if the aligned position <= start or pos > len
+    /// - `right`: Range from `align_down(start + pos)` to `end` (4K aligned)
+    /// 
+    /// # 参数
+    /// - `pos`: 从范围起始位置开始的相对偏移量。
+    /// 
+    /// # 返回值
+    /// `(Option<left>, right)`：
+    /// - `left`: 从 `start` 到 `align_down(start + pos)` 的范围，如果对齐后的位置 <= start 或 pos > len 则为 `None`
+    /// - `right`: 从 `align_down(start + pos)` 到 `end`（4K对齐）的范围
+    /// 
+    /// # Examples
+    /// ```ignore
+    /// # use ranged_mmap::file::range::AllocatedRange;
+    /// let range = AllocatedRange::from_range_unchecked(0, 8192); // Range [0, 8192)
+    /// let (left, right) = range.split_at_align_down(5000);
+    /// assert_eq!(left.unwrap().start(), 0);
+    /// assert_eq!(left.unwrap().end(), 4096);  // Aligned down from 5000
+    /// assert_eq!(right.start(), 4096);
+    /// assert_eq!(right.end(), 8192);
+    /// ```
+    #[inline]
+    pub fn split_at_align_down(&self, pos: u64) -> (Option<AllocatedRange>, AllocatedRange) {
+        let start = self.start;
+        let end = self.end;
+        let len = self.len();
+
+        if pos > len {
+            return (None, AllocatedRange::from_range_unchecked(start, end));
+        }
+        
+        let split_point = align_down(start + pos);
+        
+        if split_point <= start {
+            // Aligned position is at or before start, no left range
+            (
+                None,
+                AllocatedRange::from_range_unchecked(start, end)
+            )
+        } else {
+            (
+                Some(AllocatedRange::from_range_unchecked(start, split_point)),
+                AllocatedRange::from_range_unchecked(split_point, end)
+            )
+        }
     }
 
     /// Get the range as a tuple (start, end)
@@ -322,152 +386,175 @@ impl WriteReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::allocator::ALIGNMENT;
+
+    // ========== split_at_align_up tests ==========
 
     #[test]
-    fn test_split_at_basic() {
-        // Test splitting a range [0, 10) at relative position 5
-        let range = AllocatedRange::from_range_unchecked(0, 10);
-        let (left, right) = range.split_at(NonZeroU64::new(5).unwrap()).unwrap();
+    fn test_split_at_align_up_basic() {
+        // Range [0, 8192), split at pos 100 -> align_up(100) = 4096
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        let (left, right) = range.split_at_align_up(100);
         
         assert_eq!(left.start(), 0);
-        assert_eq!(left.end(), 5);
-        assert_eq!(left.len(), 5);
+        assert_eq!(left.end(), ALIGNMENT);
         
-        assert_eq!(right.start(), 5);
-        assert_eq!(right.end(), 10);
-        assert_eq!(right.len(), 5);
+        let right = right.unwrap();
+        assert_eq!(right.start(), ALIGNMENT);
+        assert_eq!(right.end(), 8192);
     }
 
     #[test]
-    fn test_split_at_non_zero_start() {
-        // Test splitting a range [10, 20) at relative position 5
-        let range = AllocatedRange::from_range_unchecked(10, 20);
-        let (left, right) = range.split_at(NonZeroU64::new(5).unwrap()).unwrap();
-        
-        assert_eq!(left.start(), 10);
-        assert_eq!(left.end(), 15);
-        assert_eq!(left.len(), 5);
-        
-        assert_eq!(right.start(), 15);
-        assert_eq!(right.end(), 20);
-        assert_eq!(right.len(), 5);
-    }
-
-    #[test]
-    fn test_split_at_beginning() {
-        // Test splitting at the beginning (position 1) - creates minimal left range
-        let range = AllocatedRange::from_range_unchecked(0, 10);
-        let (left, right) = range.split_at(NonZeroU64::new(1).unwrap()).unwrap();
+    fn test_split_at_align_up_already_aligned() {
+        // Range [0, 8192), split at pos 4096 -> align_up(4096) = 4096
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        let (left, right) = range.split_at_align_up(ALIGNMENT);
         
         assert_eq!(left.start(), 0);
-        assert_eq!(left.end(), 1);
-        assert_eq!(left.len(), 1);
+        assert_eq!(left.end(), ALIGNMENT);
         
-        assert_eq!(right.start(), 1);
-        assert_eq!(right.end(), 10);
-        assert_eq!(right.len(), 9);
+        let right = right.unwrap();
+        assert_eq!(right.start(), ALIGNMENT);
+        assert_eq!(right.end(), 8192);
     }
 
     #[test]
-    fn test_split_at_near_end() {
-        // Test splitting near the end - creates minimal right range
-        let range = AllocatedRange::from_range_unchecked(0, 10);
-        let (left, right) = range.split_at(NonZeroU64::new(9).unwrap()).unwrap();
+    fn test_split_at_align_up_no_right_range() {
+        // Range [0, 4096), split at pos 100 -> align_up(100) = 4096 >= end
+        let range = AllocatedRange::from_range_unchecked(0, ALIGNMENT);
+        let (left, right) = range.split_at_align_up(100);
         
         assert_eq!(left.start(), 0);
-        assert_eq!(left.end(), 9);
-        assert_eq!(left.len(), 9);
-        
-        assert_eq!(right.start(), 9);
-        assert_eq!(right.end(), 10);
-        assert_eq!(right.len(), 1);
+        assert_eq!(left.end(), ALIGNMENT);
+        assert!(right.is_none());
     }
 
     #[test]
-    fn test_split_at_exact_length() {
-        // Test splitting at exactly the length - should create right range with zero length
-        let range = AllocatedRange::from_range_unchecked(0, 10);
-        let (left, right) = range.split_at(NonZeroU64::new(10).unwrap()).unwrap();
+    fn test_split_at_align_up_pos_beyond_len() {
+        // Range [0, 4096), split at pos 5000 -> pos > len, returns full range
+        let range = AllocatedRange::from_range_unchecked(0, ALIGNMENT);
+        let (left, right) = range.split_at_align_up(5000);
         
         assert_eq!(left.start(), 0);
-        assert_eq!(left.end(), 10);
-        assert_eq!(left.len(), 10);
-        
-        assert_eq!(right.start(), 10);
-        assert_eq!(right.end(), 10);
-        assert_eq!(right.len(), 0);
-        assert!(right.is_empty());
+        assert_eq!(left.end(), ALIGNMENT);
+        assert!(right.is_none());
     }
 
     #[test]
-    fn test_split_at_beyond_length() {
-        // Test splitting beyond the length - should fail
-        let range = AllocatedRange::from_range_unchecked(0, 10);
-        let result = range.split_at(NonZeroU64::new(11).unwrap());
+    fn test_split_at_align_up_pos_zero() {
+        // Range [0, 8192), split at pos 0 -> align_up(0) = 0
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        let (left, right) = range.split_at_align_up(0);
         
-        assert!(result.is_err());
+        assert_eq!(left.start(), 0);
+        assert_eq!(left.end(), 0);
+        assert!(left.is_empty());
+        
+        let right = right.unwrap();
+        assert_eq!(right.start(), 0);
+        assert_eq!(right.end(), 8192);
     }
 
     #[test]
-    fn test_split_at_large_offset() {
-        // Test with large offset values
-        let range = AllocatedRange::from_range_unchecked(1000, 2000);
-        let (left, right) = range.split_at(NonZeroU64::new(500).unwrap()).unwrap();
+    fn test_split_at_align_up_non_zero_start() {
+        // Range [4096, 12288), split at pos 100 -> align_up(4096 + 100) = 8192
+        let range = AllocatedRange::from_range_unchecked(ALIGNMENT, 3 * ALIGNMENT);
+        let (left, right) = range.split_at_align_up(100);
         
-        assert_eq!(left.start(), 1000);
-        assert_eq!(left.end(), 1500);
-        assert_eq!(left.len(), 500);
+        assert_eq!(left.start(), ALIGNMENT);
+        assert_eq!(left.end(), 2 * ALIGNMENT);
         
-        assert_eq!(right.start(), 1500);
-        assert_eq!(right.end(), 2000);
-        assert_eq!(right.len(), 500);
+        let right = right.unwrap();
+        assert_eq!(right.start(), 2 * ALIGNMENT);
+        assert_eq!(right.end(), 3 * ALIGNMENT);
+    }
+
+    // ========== split_at_align_down tests ==========
+
+    #[test]
+    fn test_split_at_align_down_basic() {
+        // Range [0, 8192), split at pos 5000 -> align_down(5000) = 4096
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        let (left, right) = range.split_at_align_down(5000);
+        
+        let left = left.unwrap();
+        assert_eq!(left.start(), 0);
+        assert_eq!(left.end(), ALIGNMENT);
+        
+        assert_eq!(right.start(), ALIGNMENT);
+        assert_eq!(right.end(), 8192);
     }
 
     #[test]
-    fn test_split_at_preserves_total_length() {
-        // Verify that the sum of split ranges equals the original range
-        let range = AllocatedRange::from_range_unchecked(100, 200);
-        let (left, right) = range.split_at(NonZeroU64::new(30).unwrap()).unwrap();
+    fn test_split_at_align_down_already_aligned() {
+        // Range [0, 8192), split at pos 4096 -> align_down(4096) = 4096
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        let (left, right) = range.split_at_align_down(ALIGNMENT);
         
-        assert_eq!(left.len() + right.len(), range.len());
+        let left = left.unwrap();
+        assert_eq!(left.start(), 0);
+        assert_eq!(left.end(), ALIGNMENT);
+        
+        assert_eq!(right.start(), ALIGNMENT);
+        assert_eq!(right.end(), 8192);
+    }
+
+    #[test]
+    fn test_split_at_align_down_no_left_range() {
+        // Range [0, 8192), split at pos 100 -> align_down(100) = 0 <= start
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        let (left, right) = range.split_at_align_down(100);
+        
+        assert!(left.is_none());
+        assert_eq!(right.start(), 0);
+        assert_eq!(right.end(), 8192);
+    }
+
+    #[test]
+    fn test_split_at_align_down_pos_beyond_len() {
+        // Range [0, 4096), split at pos 5000 -> pos > len, returns full range
+        let range = AllocatedRange::from_range_unchecked(0, ALIGNMENT);
+        let (left, right) = range.split_at_align_down(5000);
+        
+        assert!(left.is_none());
+        assert_eq!(right.start(), 0);
+        assert_eq!(right.end(), ALIGNMENT);
+    }
+
+    #[test]
+    fn test_split_at_align_down_pos_zero() {
+        // Range [0, 8192), split at pos 0 -> align_down(0) = 0 <= start
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        let (left, right) = range.split_at_align_down(0);
+        
+        assert!(left.is_none());
+        assert_eq!(right.start(), 0);
+        assert_eq!(right.end(), 8192);
+    }
+
+    #[test]
+    fn test_split_at_align_down_non_zero_start() {
+        // Range [4096, 12288), split at pos 5000 -> align_down(4096 + 5000) = 8192
+        let range = AllocatedRange::from_range_unchecked(ALIGNMENT, 3 * ALIGNMENT);
+        let (left, right) = range.split_at_align_down(5000);
+        
+        let left = left.unwrap();
+        assert_eq!(left.start(), ALIGNMENT);
+        assert_eq!(left.end(), 2 * ALIGNMENT);
+        
+        assert_eq!(right.start(), 2 * ALIGNMENT);
+        assert_eq!(right.end(), 3 * ALIGNMENT);
+    }
+
+    #[test]
+    fn test_split_preserves_total_coverage() {
+        // Verify that split ranges cover the original range
+        let range = AllocatedRange::from_range_unchecked(0, 3 * ALIGNMENT);
+        
+        let (left, right) = range.split_at_align_up(5000);
+        let right = right.unwrap();
         assert_eq!(left.start(), range.start());
         assert_eq!(right.end(), range.end());
         assert_eq!(left.end(), right.start());
-    }
-
-    #[test]
-    fn test_split_at_edge_case_single_byte() {
-        // Test with a single-byte range
-        let range = AllocatedRange::from_range_unchecked(0, 1);
-        let (left, right) = range.split_at(NonZeroU64::new(1).unwrap()).unwrap();
-        
-        assert_eq!(left.start(), 0);
-        assert_eq!(left.end(), 1);
-        assert_eq!(left.len(), 1);
-        
-        assert_eq!(right.start(), 1);
-        assert_eq!(right.end(), 1);
-        assert_eq!(right.len(), 0);
-        assert!(right.is_empty());
-    }
-
-    #[test]
-    fn test_split_at_multiple_splits() {
-        // Test that multiple splits work correctly
-        let range = AllocatedRange::from_range_unchecked(0, 100);
-        
-        // First split at position 25
-        let (left1, right1) = range.split_at(NonZeroU64::new(25).unwrap()).unwrap();
-        assert_eq!(left1.start(), 0);
-        assert_eq!(left1.end(), 25);
-        assert_eq!(right1.start(), 25);
-        assert_eq!(right1.end(), 100);
-        
-        // Second split of the right part at relative position 50 (absolute 75)
-        let (left2, right2) = right1.split_at(NonZeroU64::new(50).unwrap()).unwrap();
-        assert_eq!(left2.start(), 25);
-        assert_eq!(left2.end(), 75);
-        assert_eq!(right2.start(), 75);
-        assert_eq!(right2.end(), 100);
     }
 }

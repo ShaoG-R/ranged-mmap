@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ranged-mmap = "0.2"
+ranged-mmap = "0.3"
 ```
 
 ### Type-Safe Version (Recommended)
