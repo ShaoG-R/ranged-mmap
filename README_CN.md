@@ -39,7 +39,7 @@
 
 ```toml
 [dependencies]
-ranged-mmap = "0.3"
+ranged-mmap = "0.4"
 ```
 
 ### 类型安全版本（推荐）
@@ -124,7 +124,8 @@ fn main() -> ranged_mmap::Result<()> {
 - **`allocator::concurrent::Allocator`**：无等待并发分配器，用于多线程场景
 - **`AllocatedRange`**：表示有效且不重叠的文件范围
 - **`WriteReceipt`**：证明范围已被写入的凭据（实现类型安全的刷新）
-- **`SplitResult`**：在 4K 对齐位置拆分已分配范围的结果
+- **`SplitUpResult`**：4K 上对齐拆分的结果
+- **`SplitDownResult`**：4K 下对齐拆分的结果
 - **`ALIGNMENT`**：4K 对齐常量（4096 字节）
 - **`align_up`**：将值向上对齐到 4K 边界的函数
 - **`align_down`**：将值向下对齐到 4K 边界的函数

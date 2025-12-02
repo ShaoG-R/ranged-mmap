@@ -118,4 +118,4 @@ mod tests;
 pub use error::{Error, Result};
 pub use mmap_file::MmapFile;
 pub use mmap_file_inner::MmapFileInner;
-pub use range::{AllocatedRange, WriteReceipt, SplitResult};
+pub use range::{AllocatedRange, WriteReceipt, SplitUpResult, SplitDownResult};

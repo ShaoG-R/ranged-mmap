@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ranged-mmap = "0.3"
+ranged-mmap = "0.4"
 ```
 
 ### Type-Safe Version (Recommended)
@@ -124,7 +124,8 @@ fn main() -> ranged_mmap::Result<()> {
 - **`allocator::concurrent::Allocator`**: Wait-free concurrent allocator for multi-thread scenarios
 - **`AllocatedRange`**: Represents a valid, non-overlapping file range
 - **`WriteReceipt`**: Proof that a range has been written (enables type-safe flushing)
-- **`SplitResult`**: Result of splitting an allocated range at a 4K-aligned position
+- **`SplitUpResult`**: Result of splitting with 4K upper alignment
+- **`SplitDownResult`**: Result of splitting with 4K lower alignment
 - **`ALIGNMENT`**: 4K alignment constant (4096 bytes)
 - **`align_up`**: Function to align values up to 4K boundary
 - **`align_down`**: Function to align values down to 4K boundary

@@ -5,22 +5,24 @@
 use std::ops::Range;
 use super::allocator::{align_up, align_down};
 
-/// Result of splitting an allocated range at a 4K-aligned position
+/// Result of `split_at_align_up`
 /// 
-/// 在4K对齐位置拆分已分配范围的结果
+/// `split_at_align_up` 的返回结果
 /// 
 /// # Variants
 /// 
 /// - `Split`: Successfully split into two non-empty ranges (low, high)
-/// - `Whole`: Cannot split, returns the original range
+/// - `Low`: Only low range exists (split point >= end)
+/// - `OutOfBounds`: Position exceeds range length (pos > len)
 /// 
 /// # 变体
 /// 
 /// - `Split`: 成功拆分为两个非空范围 (low, high)
-/// - `Whole`: 无法拆分，返回原始范围
+/// - `Low`: 仅存在低范围（分割点 >= end）
+/// - `OutOfBounds`: 位置超出范围长度 (pos > len)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum SplitResult {
+pub enum SplitUpResult {
     /// Successfully split into two ranges
     /// 
     /// 成功拆分为两个范围
@@ -34,59 +36,135 @@ pub enum SplitResult {
         /// 高范围 [split_point, end)
         high: AllocatedRange,
     },
-    /// Cannot split, returns the whole range
+    /// Only low range exists (split point aligned to or beyond end)
     /// 
-    /// 无法拆分，返回完整范围
-    Whole(AllocatedRange),
+    /// 仅存在低范围（分割点对齐到 end 或超出）
+    Low(AllocatedRange),
+    /// Position out of bounds (pos > len)
+    /// 
+    /// 位置越界 (pos > len)
+    OutOfBounds(AllocatedRange),
 }
 
-impl SplitResult {
-    /// Returns true if the range was successfully split
+impl SplitUpResult {
+    /// Returns true if the range was successfully split into two parts
     /// 
-    /// 如果范围成功拆分则返回 true
+    /// 如果范围成功拆分为两部分则返回 true
     #[inline]
     pub fn is_split(&self) -> bool {
-        matches!(self, SplitResult::Split { .. })
+        matches!(self, SplitUpResult::Split { .. })
     }
 
-    /// Returns true if the range could not be split
+    /// Returns true if position was out of bounds
     /// 
-    /// 如果范围无法拆分则返回 true
+    /// 如果位置越界则返回 true
     #[inline]
-    pub fn is_whole(&self) -> bool {
-        matches!(self, SplitResult::Whole(_))
+    pub fn is_out_of_bounds(&self) -> bool {
+        matches!(self, SplitUpResult::OutOfBounds(_))
     }
 
-    /// Get the low range if split, or the whole range
+    /// Get the low range (always available except OutOfBounds)
     /// 
-    /// 获取低范围（如果已拆分）或完整范围
+    /// 获取低范围（除 OutOfBounds 外始终可用）
     #[inline]
-    pub fn low_or_whole(&self) -> AllocatedRange {
+    pub fn low(&self) -> Option<AllocatedRange> {
         match self {
-            SplitResult::Split { low, .. } => *low,
-            SplitResult::Whole(range) => *range,
+            SplitUpResult::Split { low, .. } => Some(*low),
+            SplitUpResult::Low(range) => Some(*range),
+            SplitUpResult::OutOfBounds(_) => None,
         }
     }
 
-    /// Get the high range if split, or the whole range
+    /// Get the high range if split succeeded
     /// 
-    /// 获取高范围（如果已拆分）或完整范围
+    /// 获取高范围（仅拆分成功时可用）
     #[inline]
-    pub fn high_or_whole(&self) -> AllocatedRange {
+    pub fn high(&self) -> Option<AllocatedRange> {
         match self {
-            SplitResult::Split { high, .. } => *high,
-            SplitResult::Whole(range) => *range,
+            SplitUpResult::Split { high, .. } => Some(*high),
+            _ => None,
+        }
+    }
+}
+
+/// Result of `split_at_align_down`
+/// 
+/// `split_at_align_down` 的返回结果
+/// 
+/// # Variants
+/// 
+/// - `Split`: Successfully split into two non-empty ranges (low, high)
+/// - `High`: Only high range exists (split point <= start)
+/// - `OutOfBounds`: Position exceeds range length (pos > len)
+/// 
+/// # 变体
+/// 
+/// - `Split`: 成功拆分为两个非空范围 (low, high)
+/// - `High`: 仅存在高范围（分割点 <= start）
+/// - `OutOfBounds`: 位置超出范围长度 (pos > len)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum SplitDownResult {
+    /// Successfully split into two ranges
+    /// 
+    /// 成功拆分为两个范围
+    Split {
+        /// Lower range [start, split_point)
+        /// 
+        /// 低范围 [start, split_point)
+        low: AllocatedRange,
+        /// Higher range [split_point, end)
+        /// 
+        /// 高范围 [split_point, end)
+        high: AllocatedRange,
+    },
+    /// Only high range exists (split point aligned to or before start)
+    /// 
+    /// 仅存在高范围（分割点对齐到 start 或之前）
+    High(AllocatedRange),
+    /// Position out of bounds (pos > len)
+    /// 
+    /// 位置越界 (pos > len)
+    OutOfBounds(AllocatedRange),
+}
+
+impl SplitDownResult {
+    /// Returns true if the range was successfully split into two parts
+    /// 
+    /// 如果范围成功拆分为两部分则返回 true
+    #[inline]
+    pub fn is_split(&self) -> bool {
+        matches!(self, SplitDownResult::Split { .. })
+    }
+
+    /// Returns true if position was out of bounds
+    /// 
+    /// 如果位置越界则返回 true
+    #[inline]
+    pub fn is_out_of_bounds(&self) -> bool {
+        matches!(self, SplitDownResult::OutOfBounds(_))
+    }
+
+    /// Get the low range if split succeeded
+    /// 
+    /// 获取低范围（仅拆分成功时可用）
+    #[inline]
+    pub fn low(&self) -> Option<AllocatedRange> {
+        match self {
+            SplitDownResult::Split { low, .. } => Some(*low),
+            _ => None,
         }
     }
 
-    /// Get both ranges as a tuple (low, high), or (whole, whole) if not split
+    /// Get the high range (always available except OutOfBounds)
     /// 
-    /// 获取两个范围的元组 (low, high)，如果未拆分则返回 (whole, whole)
+    /// 获取高范围（除 OutOfBounds 外始终可用）
     #[inline]
-    pub fn as_tuple(&self) -> (AllocatedRange, AllocatedRange) {
+    pub fn high(&self) -> Option<AllocatedRange> {
         match self {
-            SplitResult::Split { low, high } => (*low, *high),
-            SplitResult::Whole(range) => (*range, *range),
+            SplitDownResult::Split { high, .. } => Some(*high),
+            SplitDownResult::High(range) => Some(*range),
+            SplitDownResult::OutOfBounds(_) => None,
         }
     }
 }
@@ -237,44 +315,46 @@ impl AllocatedRange {
     /// - `pos`: Relative offset from the start of the range.
     /// 
     /// # Returns
-    /// - `SplitResult::Split { low, high }`: Successfully split into [start, split) and [split, end)
-    /// - `SplitResult::Whole`: Cannot split (pos > len, or aligned position >= end)
+    /// - `SplitUpResult::Split { low, high }`: Successfully split into [start, split) and [split, end)
+    /// - `SplitUpResult::Low`: Only low range exists (split point >= end)
+    /// - `SplitUpResult::OutOfBounds`: Position exceeds range length (pos > len)
     /// 
     /// # 参数
     /// - `pos`: 从范围起始位置开始的相对偏移量。
     /// 
     /// # 返回值
-    /// - `SplitResult::Split { low, high }`: 成功拆分为 [start, split) 和 [split, end)
-    /// - `SplitResult::Whole`: 无法拆分（pos > len，或对齐后位置 >= end）
+    /// - `SplitUpResult::Split { low, high }`: 成功拆分为 [start, split) 和 [split, end)
+    /// - `SplitUpResult::Low`: 仅存在低范围（分割点 >= end）
+    /// - `SplitUpResult::OutOfBounds`: 位置超出范围长度 (pos > len)
     /// 
     /// # Examples
     /// ```ignore
-    /// # use ranged_mmap::file::range::{AllocatedRange, SplitResult};
+    /// # use ranged_mmap::file::range::{AllocatedRange, SplitUpResult};
     /// let range = AllocatedRange::from_range_unchecked(0, 8192);
     /// match range.split_at_align_up(100) {
-    ///     SplitResult::Split { low, high } => {
+    ///     SplitUpResult::Split { low, high } => {
     ///         assert_eq!(low.end(), 4096);  // Aligned up from 100
     ///         assert_eq!(high.start(), 4096);
     ///     }
-    ///     SplitResult::Whole(_) => panic!("expected split"),
+    ///     _ => panic!("expected split"),
     /// }
     /// ```
     #[inline]
-    pub fn split_at_align_up(&self, pos: u64) -> SplitResult {
+    pub fn split_at_align_up(&self, pos: u64) -> SplitUpResult {
         let start = self.start;
         let end = self.end;
         let len = self.len();
 
         if pos > len {
-            return SplitResult::Whole(*self);
+            return SplitUpResult::OutOfBounds(*self);
         }
         
         let split_point = align_up(start + pos);
         
-        if split_point >= end || split_point <= start {
-            SplitResult::Whole(*self)
+        if split_point >= end {
+            SplitUpResult::Low(*self)
         } else {
-            SplitResult::Split {
+            SplitUpResult::Split {
                 low: AllocatedRange::from_range_unchecked(start, split_point),
                 high: AllocatedRange::from_range_unchecked(split_point, end),
             }
@@ -293,44 +373,46 @@ impl AllocatedRange {
     /// - `pos`: Relative offset from the start of the range.
     /// 
     /// # Returns
-    /// - `SplitResult::Split { low, high }`: Successfully split into [start, split) and [split, end)
-    /// - `SplitResult::Whole`: Cannot split (pos > len, or aligned position <= start)
+    /// - `SplitDownResult::Split { low, high }`: Successfully split into [start, split) and [split, end)
+    /// - `SplitDownResult::High`: Only high range exists (split point <= start)
+    /// - `SplitDownResult::OutOfBounds`: Position exceeds range length (pos > len)
     /// 
     /// # 参数
     /// - `pos`: 从范围起始位置开始的相对偏移量。
     /// 
     /// # 返回值
-    /// - `SplitResult::Split { low, high }`: 成功拆分为 [start, split) 和 [split, end)
-    /// - `SplitResult::Whole`: 无法拆分（pos > len，或对齐后位置 <= start）
+    /// - `SplitDownResult::Split { low, high }`: 成功拆分为 [start, split) 和 [split, end)
+    /// - `SplitDownResult::High`: 仅存在高范围（分割点 <= start）
+    /// - `SplitDownResult::OutOfBounds`: 位置超出范围长度 (pos > len)
     /// 
     /// # Examples
     /// ```ignore
-    /// # use ranged_mmap::file::range::{AllocatedRange, SplitResult};
+    /// # use ranged_mmap::file::range::{AllocatedRange, SplitDownResult};
     /// let range = AllocatedRange::from_range_unchecked(0, 8192);
     /// match range.split_at_align_down(5000) {
-    ///     SplitResult::Split { low, high } => {
+    ///     SplitDownResult::Split { low, high } => {
     ///         assert_eq!(low.end(), 4096);  // Aligned down from 5000
     ///         assert_eq!(high.start(), 4096);
     ///     }
-    ///     SplitResult::Whole(_) => panic!("expected split"),
+    ///     _ => panic!("expected split"),
     /// }
     /// ```
     #[inline]
-    pub fn split_at_align_down(&self, pos: u64) -> SplitResult {
+    pub fn split_at_align_down(&self, pos: u64) -> SplitDownResult {
         let start = self.start;
         let end = self.end;
         let len = self.len();
 
         if pos > len {
-            return SplitResult::Whole(*self);
+            return SplitDownResult::OutOfBounds(*self);
         }
         
         let split_point = align_down(start + pos);
         
-        if split_point <= start || split_point >= end {
-            SplitResult::Whole(*self)
+        if split_point <= start {
+            SplitDownResult::High(*self)
         } else {
-            SplitResult::Split {
+            SplitDownResult::Split {
                 low: AllocatedRange::from_range_unchecked(start, split_point),
                 high: AllocatedRange::from_range_unchecked(split_point, end),
             }
@@ -481,13 +563,13 @@ mod tests {
         // Range [0, 8192), split at pos 100 -> align_up(100) = 4096
         let range = AllocatedRange::from_range_unchecked(0, 8192);
         match range.split_at_align_up(100) {
-            SplitResult::Split { low, high } => {
+            SplitUpResult::Split { low, high } => {
                 assert_eq!(low.start(), 0);
                 assert_eq!(low.end(), ALIGNMENT);
                 assert_eq!(high.start(), ALIGNMENT);
                 assert_eq!(high.end(), 8192);
             }
-            SplitResult::Whole(_) => panic!("expected split"),
+            _ => panic!("expected split"),
         }
     }
 
@@ -496,52 +578,56 @@ mod tests {
         // Range [0, 8192), split at pos 4096 -> align_up(4096) = 4096
         let range = AllocatedRange::from_range_unchecked(0, 8192);
         match range.split_at_align_up(ALIGNMENT) {
-            SplitResult::Split { low, high } => {
+            SplitUpResult::Split { low, high } => {
                 assert_eq!(low.start(), 0);
                 assert_eq!(low.end(), ALIGNMENT);
                 assert_eq!(high.start(), ALIGNMENT);
                 assert_eq!(high.end(), 8192);
             }
-            SplitResult::Whole(_) => panic!("expected split"),
+            _ => panic!("expected split"),
         }
     }
 
     #[test]
-    fn test_split_at_align_up_returns_whole() {
+    fn test_split_at_align_up_returns_low() {
         // Range [0, 4096), split at pos 100 -> align_up(100) = 4096 >= end
         let range = AllocatedRange::from_range_unchecked(0, ALIGNMENT);
         match range.split_at_align_up(100) {
-            SplitResult::Whole(whole) => {
-                assert_eq!(whole.start(), 0);
-                assert_eq!(whole.end(), ALIGNMENT);
+            SplitUpResult::Low(low) => {
+                assert_eq!(low.start(), 0);
+                assert_eq!(low.end(), ALIGNMENT);
             }
-            SplitResult::Split { .. } => panic!("expected whole"),
+            _ => panic!("expected Low"),
         }
     }
 
     #[test]
     fn test_split_at_align_up_pos_beyond_len() {
-        // Range [0, 4096), split at pos 5000 -> pos > len, returns whole
+        // Range [0, 4096), split at pos 5000 -> pos > len, returns OutOfBounds
         let range = AllocatedRange::from_range_unchecked(0, ALIGNMENT);
         match range.split_at_align_up(5000) {
-            SplitResult::Whole(whole) => {
-                assert_eq!(whole.start(), 0);
-                assert_eq!(whole.end(), ALIGNMENT);
+            SplitUpResult::OutOfBounds(r) => {
+                assert_eq!(r.start(), 0);
+                assert_eq!(r.end(), ALIGNMENT);
             }
-            SplitResult::Split { .. } => panic!("expected whole"),
+            _ => panic!("expected OutOfBounds"),
         }
     }
 
     #[test]
     fn test_split_at_align_up_pos_zero() {
-        // Range [0, 8192), split at pos 0 -> align_up(0) = 0, split_point <= start
+        // Range [0, 8192), split at pos 0 -> align_up(0) = 0
+        // split_point = 0, which is not >= end (8192), so should split with empty low
         let range = AllocatedRange::from_range_unchecked(0, 8192);
         match range.split_at_align_up(0) {
-            SplitResult::Whole(whole) => {
-                assert_eq!(whole.start(), 0);
-                assert_eq!(whole.end(), 8192);
+            SplitUpResult::Split { low, high } => {
+                assert_eq!(low.start(), 0);
+                assert_eq!(low.end(), 0);
+                assert!(low.is_empty());
+                assert_eq!(high.start(), 0);
+                assert_eq!(high.end(), 8192);
             }
-            SplitResult::Split { .. } => panic!("expected whole"),
+            _ => panic!("expected Split"),
         }
     }
 
@@ -550,13 +636,13 @@ mod tests {
         // Range [4096, 12288), split at pos 100 -> align_up(4096 + 100) = 8192
         let range = AllocatedRange::from_range_unchecked(ALIGNMENT, 3 * ALIGNMENT);
         match range.split_at_align_up(100) {
-            SplitResult::Split { low, high } => {
+            SplitUpResult::Split { low, high } => {
                 assert_eq!(low.start(), ALIGNMENT);
                 assert_eq!(low.end(), 2 * ALIGNMENT);
                 assert_eq!(high.start(), 2 * ALIGNMENT);
                 assert_eq!(high.end(), 3 * ALIGNMENT);
             }
-            SplitResult::Whole(_) => panic!("expected split"),
+            _ => panic!("expected split"),
         }
     }
 
@@ -567,13 +653,13 @@ mod tests {
         // Range [0, 8192), split at pos 5000 -> align_down(5000) = 4096
         let range = AllocatedRange::from_range_unchecked(0, 8192);
         match range.split_at_align_down(5000) {
-            SplitResult::Split { low, high } => {
+            SplitDownResult::Split { low, high } => {
                 assert_eq!(low.start(), 0);
                 assert_eq!(low.end(), ALIGNMENT);
                 assert_eq!(high.start(), ALIGNMENT);
                 assert_eq!(high.end(), 8192);
             }
-            SplitResult::Whole(_) => panic!("expected split"),
+            _ => panic!("expected split"),
         }
     }
 
@@ -582,39 +668,39 @@ mod tests {
         // Range [0, 8192), split at pos 4096 -> align_down(4096) = 4096
         let range = AllocatedRange::from_range_unchecked(0, 8192);
         match range.split_at_align_down(ALIGNMENT) {
-            SplitResult::Split { low, high } => {
+            SplitDownResult::Split { low, high } => {
                 assert_eq!(low.start(), 0);
                 assert_eq!(low.end(), ALIGNMENT);
                 assert_eq!(high.start(), ALIGNMENT);
                 assert_eq!(high.end(), 8192);
             }
-            SplitResult::Whole(_) => panic!("expected split"),
+            _ => panic!("expected split"),
         }
     }
 
     #[test]
-    fn test_split_at_align_down_returns_whole() {
+    fn test_split_at_align_down_returns_high() {
         // Range [0, 8192), split at pos 100 -> align_down(100) = 0 <= start
         let range = AllocatedRange::from_range_unchecked(0, 8192);
         match range.split_at_align_down(100) {
-            SplitResult::Whole(whole) => {
-                assert_eq!(whole.start(), 0);
-                assert_eq!(whole.end(), 8192);
+            SplitDownResult::High(high) => {
+                assert_eq!(high.start(), 0);
+                assert_eq!(high.end(), 8192);
             }
-            SplitResult::Split { .. } => panic!("expected whole"),
+            _ => panic!("expected High"),
         }
     }
 
     #[test]
     fn test_split_at_align_down_pos_beyond_len() {
-        // Range [0, 4096), split at pos 5000 -> pos > len, returns whole
+        // Range [0, 4096), split at pos 5000 -> pos > len, returns OutOfBounds
         let range = AllocatedRange::from_range_unchecked(0, ALIGNMENT);
         match range.split_at_align_down(5000) {
-            SplitResult::Whole(whole) => {
-                assert_eq!(whole.start(), 0);
-                assert_eq!(whole.end(), ALIGNMENT);
+            SplitDownResult::OutOfBounds(r) => {
+                assert_eq!(r.start(), 0);
+                assert_eq!(r.end(), ALIGNMENT);
             }
-            SplitResult::Split { .. } => panic!("expected whole"),
+            _ => panic!("expected OutOfBounds"),
         }
     }
 
@@ -623,11 +709,11 @@ mod tests {
         // Range [0, 8192), split at pos 0 -> align_down(0) = 0 <= start
         let range = AllocatedRange::from_range_unchecked(0, 8192);
         match range.split_at_align_down(0) {
-            SplitResult::Whole(whole) => {
-                assert_eq!(whole.start(), 0);
-                assert_eq!(whole.end(), 8192);
+            SplitDownResult::High(high) => {
+                assert_eq!(high.start(), 0);
+                assert_eq!(high.end(), 8192);
             }
-            SplitResult::Split { .. } => panic!("expected whole"),
+            _ => panic!("expected High"),
         }
     }
 
@@ -636,43 +722,73 @@ mod tests {
         // Range [4096, 12288), split at pos 5000 -> align_down(4096 + 5000) = 8192
         let range = AllocatedRange::from_range_unchecked(ALIGNMENT, 3 * ALIGNMENT);
         match range.split_at_align_down(5000) {
-            SplitResult::Split { low, high } => {
+            SplitDownResult::Split { low, high } => {
                 assert_eq!(low.start(), ALIGNMENT);
                 assert_eq!(low.end(), 2 * ALIGNMENT);
                 assert_eq!(high.start(), 2 * ALIGNMENT);
                 assert_eq!(high.end(), 3 * ALIGNMENT);
             }
-            SplitResult::Whole(_) => panic!("expected split"),
+            _ => panic!("expected split"),
         }
     }
 
-    // ========== SplitResult helper tests ==========
+    // ========== Helper method tests ==========
 
     #[test]
-    fn test_split_result_helpers() {
+    fn test_split_up_result_helpers() {
         let range = AllocatedRange::from_range_unchecked(0, 3 * ALIGNMENT);
         
         // Test with successful split
         let result = range.split_at_align_up(5000);
         assert!(result.is_split());
-        assert!(!result.is_whole());
+        assert!(!result.is_out_of_bounds());
         
-        let (low, high) = result.as_tuple();
+        let low = result.low().unwrap();
+        let high = result.high().unwrap();
         assert_eq!(low.start(), range.start());
         assert_eq!(high.end(), range.end());
         assert_eq!(low.end(), high.start());
     }
 
     #[test]
-    fn test_split_result_whole_helpers() {
+    fn test_split_up_result_low_helpers() {
         let range = AllocatedRange::from_range_unchecked(0, ALIGNMENT);
         
-        // Test with whole (cannot split)
+        // Test with Low (cannot split, only low range)
         let result = range.split_at_align_up(100);
         assert!(!result.is_split());
-        assert!(result.is_whole());
+        assert!(!result.is_out_of_bounds());
         
-        assert_eq!(result.low_or_whole(), range);
-        assert_eq!(result.high_or_whole(), range);
+        assert_eq!(result.low(), Some(range));
+        assert_eq!(result.high(), None);
+    }
+
+    #[test]
+    fn test_split_down_result_helpers() {
+        let range = AllocatedRange::from_range_unchecked(0, 3 * ALIGNMENT);
+        
+        // Test with successful split
+        let result = range.split_at_align_down(5000);
+        assert!(result.is_split());
+        assert!(!result.is_out_of_bounds());
+        
+        let low = result.low().unwrap();
+        let high = result.high().unwrap();
+        assert_eq!(low.start(), range.start());
+        assert_eq!(high.end(), range.end());
+        assert_eq!(low.end(), high.start());
+    }
+
+    #[test]
+    fn test_split_down_result_high_helpers() {
+        let range = AllocatedRange::from_range_unchecked(0, 8192);
+        
+        // Test with High (cannot split, only high range)
+        let result = range.split_at_align_down(100);
+        assert!(!result.is_split());
+        assert!(!result.is_out_of_bounds());
+        
+        assert_eq!(result.low(), None);
+        assert_eq!(result.high(), Some(range));
     }
 }
